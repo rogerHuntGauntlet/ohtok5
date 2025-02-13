@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "293467553983",
+    "project_id": "ohftokv5",
+    "storage_bucket": "ohftokv5.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:293467553983:android:c962b884557878990e860a",
+        "android_client_info": {
+          "package_name": "ohftok5.flutter.app"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyCg49lfOIwm4qz0UU_skhI3iOO_Nrdcao4"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
