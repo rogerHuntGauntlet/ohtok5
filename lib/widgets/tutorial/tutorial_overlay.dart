@@ -68,6 +68,9 @@ class _TutorialOverlayState extends State<TutorialOverlay> with SingleTickerProv
   Widget build(BuildContext context) {
     if (!_showOverlay) return widget.child;
 
+    // Get screen size
+    final screenSize = MediaQuery.of(context).size;
+
     return Stack(
       children: [
         widget.child,
@@ -76,30 +79,34 @@ class _TutorialOverlayState extends State<TutorialOverlay> with SingleTickerProv
           child: GestureDetector(
             onTap: _hideOverlay,
             child: Container(
+              width: screenSize.width,
+              height: screenSize.height,
               color: Colors.black54,
               child: Stack(
                 children: [
                   // Highlight target area
-                  Positioned(
-                    left: widget.targetPosition.dx,
-                    top: widget.targetPosition.dy,
-                    child: Container(
-                      width: widget.targetSize.width,
-                      height: widget.targetSize.height,
-                      decoration: BoxDecoration(
-                        color: Colors.transparent,
-                        border: Border.all(
-                          color: Theme.of(context).primaryColor,
-                          width: 2,
+                  if (widget.targetPosition != Offset.zero && widget.targetSize != Size.zero)
+                    Positioned(
+                      left: widget.targetPosition.dx,
+                      top: widget.targetPosition.dy,
+                      child: Container(
+                        width: widget.targetSize.width,
+                        height: widget.targetSize.height,
+                        decoration: BoxDecoration(
+                          color: Colors.transparent,
+                          border: Border.all(
+                            color: Theme.of(context).primaryColor,
+                            width: 2,
+                          ),
+                          borderRadius: BorderRadius.circular(8),
                         ),
-                        borderRadius: BorderRadius.circular(8),
                       ),
                     ),
-                  ),
                   // Tutorial content
                   Positioned(
-                    left: widget.targetPosition.dx,
-                    top: widget.targetPosition.dy + widget.targetSize.height + 16,
+                    left: widget.targetPosition.dx.clamp(16, screenSize.width - 266),
+                    top: (widget.targetPosition.dy + widget.targetSize.height + 16)
+                        .clamp(16, screenSize.height - 200),
                     child: Container(
                       width: 250,
                       padding: const EdgeInsets.all(16),

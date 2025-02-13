@@ -3,13 +3,17 @@ import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:provider/provider.dart';
 import 'package:firebase_app_check/firebase_app_check.dart';
-import 'services/auth_service.dart';
-import 'services/theme_service.dart';
-import 'services/achievement_service.dart';
+import 'services/social/social_service.dart';
+import 'services/social/notification_service.dart';
+import 'services/analytics/analytics_service.dart';
+import 'services/movie/movie_service.dart';
+import 'services/social/auth_service.dart';
+import 'services/social/achievement_service.dart';
 import 'screens/auth/login_screen.dart';
 import 'screens/auth/register_screen.dart';
 import 'screens/auth/forgot_password_screen.dart';
 import 'screens/onboarding/onboarding_screen.dart';
+import 'screens/home/home_page.dart';
 import 'screens/auth/auth_wrapper.dart';
 import 'config/routes.dart';
 import 'package:media_kit/media_kit.dart';
@@ -19,7 +23,7 @@ void main() async {
   MediaKit.ensureInitialized();
   print('[Main] Flutter binding initialized');
   
-  await dotenv.load(fileName: ".env");
+  await dotenv.load();
   print('[Main] Environment variables loaded');
   
   await Firebase.initializeApp();
@@ -43,10 +47,16 @@ void main() async {
   runApp(
     MultiProvider(
       providers: [
-        ChangeNotifierProvider(create: (_) => ThemeService()),
+        Provider<AnalyticsService>(create: (_) => AnalyticsService()),
+        Provider<SocialService>(create: (_) => SocialService()),
+        Provider<MovieService>(create: (_) => MovieService()),
+        Provider<NotificationService>(create: (_) => NotificationService()),
         Provider<AchievementService>(create: (_) => AchievementService()),
         ProxyProvider<AchievementService, AuthService>(
-          update: (_, achievementService, __) => AuthService(achievementService: achievementService),
+          create: null,
+          update: (_, achievementService, __) => AuthService(
+            achievementService: achievementService,
+          ),
         ),
       ],
       child: const MyApp(),
@@ -59,26 +69,22 @@ class MyApp extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Consumer<ThemeService>(
-      builder: (context, themeService, child) {
-        return MaterialApp(
-          title: 'OHFtok',
-          theme: ThemeData(
-            colorScheme: themeService.currentTheme.colorScheme,
-            useMaterial3: true,
-            pageTransitionsTheme: const PageTransitionsTheme(
-              builders: {
-                TargetPlatform.android: CupertinoPageTransitionsBuilder(),
-                TargetPlatform.iOS: CupertinoPageTransitionsBuilder(),
-              },
-            ),
-          ),
-          initialRoute: Routes.login,
-          routes: {
-            ...Routes.routes,
-            Routes.initial: (context) => const AuthWrapper(),
+    return MaterialApp(
+      title: 'OHFtok',
+      theme: ThemeData(
+        colorScheme: ColorScheme.fromSeed(seedColor: Colors.deepPurple),
+        useMaterial3: true,
+        pageTransitionsTheme: const PageTransitionsTheme(
+          builders: {
+            TargetPlatform.android: CupertinoPageTransitionsBuilder(),
+            TargetPlatform.iOS: CupertinoPageTransitionsBuilder(),
           },
-        );
+        ),
+      ),
+      initialRoute: Routes.initial,
+      routes: {
+        ...Routes.routes,
+        Routes.initial: (context) => const AuthWrapper(),
       },
     );
   }
@@ -116,41 +122,6 @@ class AuthWrapper extends StatelessWidget {
         
         return const LoginScreen();
       },
-    );
-  }
-}
-
-class HomePage extends StatelessWidget {
-  const HomePage({super.key});
-
-  @override
-  Widget build(BuildContext context) {
-    final authService = Provider.of<AuthService>(context);
-    
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text('OHFtok'),
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.logout),
-            onPressed: () async {
-              await authService.signOut();
-              if (context.mounted) {
-                Navigator.of(context).pushReplacementNamed('/login');
-              }
-            },
-          ),
-        ],
-      ),
-      body: Center(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            const Text('Welcome to OHFtok!'),
-            const SizedBox(height: 20),
-          ],
-        ),
-      ),
     );
   }
 }

@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
-import '../../services/auth_service.dart';
+import '../../services/social/auth_service.dart';
 
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
@@ -32,26 +32,33 @@ class _LoginScreenState extends State<LoginScreen> {
     });
 
     try {
-      print('[LoginScreen] Starting login process');
       final authService = Provider.of<AuthService>(context, listen: false);
       
-      print('[LoginScreen] Calling authService.signIn');
-      final credential = await authService.signIn(
+      // Attempt to sign in
+      await authService.signIn(
         email: _emailController.text.trim(),
         password: _passwordController.text,
       );
       
-      print('[LoginScreen] Sign in successful, navigating...');
-      print('[LoginScreen] User details: ${credential.user?.toString()}');
-
-      if (mounted) {
-        Navigator.of(context).pushReplacementNamed('/home');
+      // Check auth state after sign in
+      if (authService.currentUser != null) {
+        if (mounted) {
+          Navigator.of(context).pushReplacementNamed('/home');
+        }
+      } else {
+        throw 'Login failed: Unable to verify authentication';
       }
     } catch (e) {
       print('[LoginScreen] Login error: $e');
-      print('[LoginScreen] Error stack trace: ${StackTrace.current}');
-      
       setState(() {
+        if (e.toString().contains('PigeonUserDetails')) {
+          // If it's a Pigeon error but we're actually logged in, don't show error
+          final authService = Provider.of<AuthService>(context, listen: false);
+          if (authService.currentUser != null) {
+            Navigator.of(context).pushReplacementNamed('/home');
+            return;
+          }
+        }
         _errorMessage = e.toString();
       });
     } finally {

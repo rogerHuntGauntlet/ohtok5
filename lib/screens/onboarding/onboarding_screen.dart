@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
-import '../../services/auth_service.dart';
+import '../../services/social/auth_service.dart';
 
 class OnboardingScreen extends StatefulWidget {
   const OnboardingScreen({super.key});
@@ -65,21 +65,69 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
         curve: Curves.easeInOut,
       );
     } else {
-      _completeOnboarding();
+      if (_selectedInterests.length >= 3) {
+        _completeOnboarding();
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Please select at least 3 interests'),
+            duration: Duration(seconds: 2),
+          ),
+        );
+      }
     }
   }
 
   void _completeOnboarding() async {
-    final authService = Provider.of<AuthService>(context, listen: false);
-    // Mark onboarding as completed and save interests in Firestore
-    await authService.updateProfile(
-      uid: authService.currentUser!.uid,
-      hasCompletedOnboarding: true,
-      interests: _selectedInterests.toList(),
-    );
-    
-    if (mounted) {
-      Navigator.of(context).pushReplacementNamed('/home');
+    try {
+      final authService = Provider.of<AuthService>(context, listen: false);
+      // Mark onboarding as completed and save interests in Firestore
+      await authService.updateProfile(
+        uid: authService.currentUser!.uid,
+        hasCompletedOnboarding: true,
+        interests: _selectedInterests.toList(),
+      );
+      
+      if (mounted) {
+        Navigator.of(context).pushReplacementNamed('/home');
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Error completing setup: ${e.toString()}'),
+            duration: const Duration(seconds: 3),
+          ),
+        );
+      }
+    }
+  }
+
+  void _handleSkip() async {
+    try {
+      final authService = Provider.of<AuthService>(context, listen: false);
+      // Set some default interests when skipping
+      final defaultInterests = ['Music', 'Entertainment', 'Trending'];
+      
+      // Mark onboarding as completed with default interests
+      await authService.updateProfile(
+        uid: authService.currentUser!.uid,
+        hasCompletedOnboarding: true,
+        interests: defaultInterests,
+      );
+      
+      if (mounted) {
+        Navigator.of(context).pushReplacementNamed('/home');
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Error skipping setup: ${e.toString()}'),
+            duration: const Duration(seconds: 3),
+          ),
+        );
+      }
     }
   }
 
@@ -141,7 +189,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
             // Skip button
             if (_currentPage < _pages.length - 1)
               TextButton(
-                onPressed: _completeOnboarding,
+                onPressed: _handleSkip,
                 child: const Text('Skip'),
               ),
             const SizedBox(height: 16),
@@ -200,7 +248,7 @@ class OnboardingPage extends StatelessWidget {
   }
 }
 
-class InterestsPage extends StatelessWidget {
+class InterestsPage extends StatefulWidget {
   final Set<String> selectedInterests;
   final Function(Set<String>) onInterestsChanged;
 
@@ -210,12 +258,25 @@ class InterestsPage extends StatelessWidget {
     required this.onInterestsChanged,
   });
 
+  @override
+  State<InterestsPage> createState() => _InterestsPageState();
+}
+
+class _InterestsPageState extends State<InterestsPage> {
   static const List<String> _availableInterests = [
     'Music', 'Dance', 'Comedy', 'Food',
     'Fashion', 'Beauty', 'Sports', 'Gaming',
     'Education', 'Technology', 'Travel', 'Art',
     'Fitness', 'Lifestyle', 'Pets', 'Nature',
   ];
+
+  late Set<String> _localSelectedInterests;
+
+  @override
+  void initState() {
+    super.initState();
+    _localSelectedInterests = Set<String>.from(widget.selectedInterests);
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -233,11 +294,11 @@ class InterestsPage extends StatelessWidget {
             textAlign: TextAlign.center,
           ),
           const SizedBox(height: 16),
-          const Text(
-            'Select at least 3 topics to personalize your feed',
+          Text(
+            'Selected ${_localSelectedInterests.length} of 3 required topics',
             style: TextStyle(
               fontSize: 16,
-              color: Colors.grey,
+              color: _localSelectedInterests.length >= 3 ? Colors.green : Colors.grey,
             ),
             textAlign: TextAlign.center,
           ),
@@ -253,22 +314,29 @@ class InterestsPage extends StatelessWidget {
               itemCount: _availableInterests.length,
               itemBuilder: (context, index) {
                 final interest = _availableInterests[index];
-                final isSelected = selectedInterests.contains(interest);
+                final isSelected = _localSelectedInterests.contains(interest);
                 
                 return FilterChip(
                   label: Text(interest),
                   selected: isSelected,
                   onSelected: (bool selected) {
-                    final newInterests = Set<String>.from(selectedInterests);
-                    if (selected) {
-                      newInterests.add(interest);
-                    } else {
-                      newInterests.remove(interest);
-                    }
-                    onInterestsChanged(newInterests);
+                    setState(() {
+                      if (selected) {
+                        _localSelectedInterests.add(interest);
+                      } else {
+                        _localSelectedInterests.remove(interest);
+                      }
+                      widget.onInterestsChanged(_localSelectedInterests);
+                    });
                   },
                   selectedColor: Theme.of(context).primaryColor.withOpacity(0.2),
                   checkmarkColor: Theme.of(context).primaryColor,
+                  showCheckmark: true,
+                  avatar: isSelected ? Icon(
+                    Icons.check_circle,
+                    color: Theme.of(context).primaryColor,
+                    size: 18,
+                  ) : null,
                 );
               },
             ),

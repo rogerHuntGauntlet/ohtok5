@@ -1,6 +1,6 @@
 # OHFtok Application File Structure
 
-## Current Structure
+## Core Structure
 ```
 lib/
 ├── main.dart
@@ -12,10 +12,17 @@ lib/
 │       └── theme_constants.dart
 │
 ├── models/
-│   ├── user.dart
-│   ├── achievement.dart
-│   ├── video.dart
-│   └── notification.dart
+│   ├── user/
+│   │   └── user.dart
+│   ├── achievement/
+│   │   └── achievement.dart
+│   ├── video/
+│   │   └── video.dart
+│   ├── movie/
+│   │   ├── movie_idea.dart
+│   │   └── movie_scene.dart
+│   └── notification/
+│       └── notification.dart
 │
 ├── screens/
 │   ├── auth/
@@ -36,6 +43,13 @@ lib/
 │   │       ├── video_feed_item.dart
 │   │       └── bottom_nav_bar.dart
 │   │
+│   ├── movie/
+│   │   ├── movie_scenes_screen.dart
+│   │   ├── scene_recording_screen.dart
+│   │   └── components/
+│   │       ├── scene_card.dart
+│   │       └── recording_controls.dart
+│   │
 │   └── profile/
 │       ├── profile_screen.dart
 │       └── components/
@@ -43,11 +57,28 @@ lib/
 │           └── achievement_list.dart
 │
 ├── services/
-│   ├── auth_service.dart
-│   ├── theme_service.dart
-│   ├── achievement_service.dart
-│   ├── notification_service.dart
-│   └── storage_service.dart
+│   ├── auth/
+│   │   └── auth_service.dart
+│   ├── theme/
+│   │   └── theme_service.dart
+│   ├── achievements/
+│   │   └── achievement_service.dart
+│   ├── video/
+│   │   ├── video_service.dart
+│   │   ├── video_processing_service.dart
+│   │   └── video_cache_service.dart
+│   ├── social/
+│   │   ├── social_service.dart
+│   │   └── notification_service.dart
+│   ├── analytics/
+│   │   ├── analytics_service.dart
+│   │   └── metrics_service.dart
+│   ├── ai/
+│   │   ├── openai_service.dart
+│   │   └── pinecone_service.dart
+│   └── movie/
+│       ├── movie_service.dart
+│       └── scene_service.dart
 │
 └── widgets/
     ├── common/
@@ -59,10 +90,113 @@ lib/
     │   ├── tutorial_overlay.dart
     │   └── feature_highlight.dart
     │
+    ├── movie/
+    │   ├── voice_input_button.dart
+    │   └── scene_list.dart
+    │
     └── profile/
         ├── profile_completion_card.dart
         └── interest_chips.dart
 ```
+
+## Directory Purposes
+
+### Config
+- **constants.dart**: Application-wide constants and configuration values
+- **routes.dart**: Route definitions and navigation configuration
+- **theme/**: Theme-related configurations and constants
+
+### Models
+Each model type has its own directory for better organization:
+- **user/**: User-related models and types
+- **achievement/**: Achievement and reward models
+- **video/**: Video-related models and metadata
+- **movie/**: Movie creation and scene models
+- **notification/**: Notification and alert models
+
+### Screens
+Feature-specific screens and their components:
+- **auth/**: Authentication-related screens
+- **onboarding/**: User onboarding flow
+- **home/**: Main application screens
+- **movie/**: Movie creation and editing
+- **profile/**: User profile management
+
+### Services
+Each service is in its own directory for better organization and modularity:
+- **auth/**: Authentication and user management
+- **theme/**: Theme management and customization
+- **achievements/**: User achievements and rewards
+- **video/**: Video processing and management
+- **social/**: Social interactions and notifications
+- **analytics/**: User analytics and metrics
+- **ai/**: AI integrations (OpenAI, Pinecone)
+- **movie/**: Movie creation and scene management
+
+### Widgets
+Reusable UI components organized by feature:
+- **common/**: Shared widgets used across the app
+- **tutorial/**: Tutorial and onboarding widgets
+- **movie/**: Movie-related UI components
+- **profile/**: Profile-related widgets
+
+## Best Practices
+
+1. **File Organization**
+   - Every feature has its own directory
+   - Related files are grouped together
+   - Clear separation between models, services, and UI
+   - Consistent naming conventions
+
+2. **Directory Structure**
+   - Maximum depth of 3-4 levels
+   - Feature-based organization
+   - Clear separation of concerns
+   - Modular and maintainable
+
+3. **Naming Conventions**
+   - snake_case for files and directories
+   - Descriptive but concise names
+   - Consistent suffixes (_screen, _service, etc.)
+   - Clear purpose indication
+
+4. **Code Organization**
+   - One class per file
+   - Feature-based grouping
+   - Clear dependencies
+   - Modular architecture
+
+5. **Import Management**
+   - Group imports by type
+   - Use relative paths within features
+   - Clear import organization
+   - Minimal dependencies
+
+## Development Guidelines
+
+1. **Adding New Features**
+   - Create feature directory in appropriate section
+   - Follow existing patterns
+   - Maintain modularity
+   - Update documentation
+
+2. **Modifying Existing Features**
+   - Respect current organization
+   - Maintain separation of concerns
+   - Update related files
+   - Keep documentation current
+
+3. **Code Style**
+   - Follow Flutter/Dart conventions
+   - Consistent formatting
+   - Clear documentation
+   - Meaningful comments
+
+4. **Testing**
+   - Group tests with features
+   - Maintain test coverage
+   - Follow testing patterns
+   - Document test cases
 
 ## Planned Structure (New Features)
 ```
@@ -134,55 +268,6 @@ lib/
         ├── metrics_display.dart
         └── chart_widgets.dart
 ```
-
-## Directory Purposes
-
-### Config
-- **constants.dart**: Application-wide constants
-- **routes.dart**: Route definitions and navigation configuration
-- **theme/**: Theme-related configurations and constants
-
-### Models
-- Data models and their related logic
-- Each model has its own file for better organization
-- Complex models may have their own subdirectory
-
-### Screens
-- Main UI screens of the application
-- Organized by feature/functionality
-- Components subdirectories for screen-specific widgets
-
-### Services
-- Business logic and data management
-- Firebase and external service integrations
-- Feature-specific services in subdirectories
-
-### Widgets
-- Reusable UI components
-- Organized by feature and common components
-- Each widget should be focused and maintainable
-
-## Best Practices
-
-1. **File Naming**
-   - Use snake_case for file names
-   - Be descriptive but concise
-   - Add _screen, _page, or _widget suffix as appropriate
-
-2. **Directory Organization**
-   - Group related files in feature-specific directories
-   - Keep directory depth reasonable (max 3-4 levels)
-   - Use index.dart files for convenient exports
-
-3. **Code Organization**
-   - One widget/class per file
-   - Keep files focused and manageable
-   - Use subdirectories for complex features
-
-4. **Import Organization**
-   - Group imports by type (dart, package, relative)
-   - Use relative imports for project files
-   - Export commonly used widgets through index files
 
 ## Next Steps
 

@@ -1,6 +1,6 @@
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:ohftokv5/services/achievement_service.dart';
+import 'achievement_service.dart';
 
 class AuthService {
   final FirebaseAuth _auth = FirebaseAuth.instance;

@@ -51,8 +51,8 @@ android {
 
     defaultConfig {
         applicationId "ohftok5.flutter.app"
-        minSdk = 21
-        targetSdk = 34
+        minSdkVersion 21
+        targetSdkVersion 34
         versionCode = flutterVersionCode.toInteger()
         versionName = flutterVersionName
         multiDexEnabled = true

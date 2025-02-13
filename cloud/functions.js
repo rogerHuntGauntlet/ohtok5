@@ -1,34 +1,9 @@
-/**
- * Import function triggers from their respective submodules:
- *
- * const {onCall} = require("firebase-functions/v2/https");
- * const {onDocumentWritten} = require("firebase-functions/v2/firestore");
- *
- * See a full list of supported triggers at https://firebase.google.com/docs/functions
- */
-
-const {onRequest} = require("firebase-functions/v2/https");
 const functions = require('firebase-functions/v2');
-const logger = require("firebase-functions/logger");
-const admin = require('firebase-admin');
-const {onDocumentCreated} = require('firebase-functions/v2/firestore');
 const { Pinecone } = require('@pinecone-database/pinecone');
 const { OpenAIEmbeddings } = require('@langchain/openai');
 const { OpenAI } = require('@langchain/openai');
 const { PromptTemplate } = require('@langchain/core/prompts');
 const { LLMChain } = require('langchain/chains');
-admin.initializeApp();
-
-// Import the RAG function
-const ragFunctions = require('./rag_functions');
-
-// Create and deploy your first functions
-// https://firebase.google.com/docs/functions/get-started
-
-// exports.helloWorld = onRequest((request, response) => {
-//   logger.info("Hello logs!", {structuredData: true});
-//   response.send("Hello from Firebase!");
-// });
 
 // Export the generateMovieScenes function as an HTTP function
 exports.generateMovieScenes = functions.https.onRequest({
@@ -38,62 +13,39 @@ exports.generateMovieScenes = functions.https.onRequest({
   cpu: 1,
   timeoutSeconds: 120
 }, async (req, res) => {
-  // Enable CORS
-  res.set('Access-Control-Allow-Origin', '*');
-  
-  if (req.method === 'OPTIONS') {
-    // Send response to OPTIONS requests
-    res.set('Access-Control-Allow-Methods', 'POST');
-    res.set('Access-Control-Allow-Headers', 'Content-Type');
-    res.status(204).send('');
-    return;
-  }
-
   try {
     console.log('Received movie idea:', req.body.movieIdea);
     
-    // Get API keys from environment or config
-    let PINECONE_API_KEY, OPENAI_API_KEY;
-    
-    if (process.env.NODE_ENV === 'production') {
-      // In production, use Firebase config
-      const config = functions.params;
-      console.log('Available config params:', Object.keys(config));
-      PINECONE_API_KEY = config.pinecone?.apikey;
-      OPENAI_API_KEY = config.openai?.apikey;
-    } else {
-      // In development, use environment variables
-      PINECONE_API_KEY = process.env.PINECONE_API_KEY;
-      OPENAI_API_KEY = process.env.OPENAI_API_KEY;
-    }
+    // Get API keys from environment variables
+    const PINECONE_API_KEY = process.env.PINECONE_API_KEY;
+    const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
 
-    console.log('API Keys loaded:', { 
+    console.log('Environment variables loaded:', { 
       hasPinecone: !!PINECONE_API_KEY, 
       hasOpenAI: !!OPENAI_API_KEY,
       pineconeKeyLength: PINECONE_API_KEY ? PINECONE_API_KEY.length : 0,
-      openaiKeyLength: OPENAI_API_KEY ? OPENAI_API_KEY.length : 0,
-      environment: process.env.NODE_ENV || 'development'
+      openaiKeyLength: OPENAI_API_KEY ? OPENAI_API_KEY.length : 0
     });
 
     if (!PINECONE_API_KEY || !OPENAI_API_KEY) {
-      console.error('Missing required API keys:', {
-        hasPinecone: !!PINECONE_API_KEY,
-        hasOpenAI: !!OPENAI_API_KEY,
-        availableConfig: process.env.NODE_ENV === 'production' ? functions.params : { PINECONE_API_KEY, OPENAI_API_KEY }
-      });
+      console.error('Missing required API keys');
       return res.status(500).json({ error: 'Server configuration error - Missing API keys' });
     }
     
     // Initialize Pinecone
     const pc = new Pinecone({
-      apiKey: PINECONE_API_KEY,
-      environment: 'aped-4627-b74a'
+      apiKey: PINECONE_API_KEY
     });
 
     // List all indexes to verify connection
     console.log('Listing Pinecone indexes...');
-    const indexes = await pc.listIndexes();
-    console.log('Available indexes:', indexes);
+    try {
+      const indexes = await pc.listIndexes();
+      console.log('Available indexes:', indexes);
+    } catch (error) {
+      console.error('Error listing Pinecone indexes:', error);
+      // Continue anyway as we know the index exists
+    }
 
     const { movieIdea } = req.body;
     if (!movieIdea) {
@@ -113,8 +65,13 @@ exports.generateMovieScenes = functions.https.onRequest({
     const index = pc.index('phd-knowledge');
 
     // Get index stats to verify content
-    const stats = await index.describeIndexStats();
-    console.log('Index stats:', stats);
+    try {
+      const stats = await index.describeIndexStats();
+      console.log('Index stats:', stats);
+    } catch (error) {
+      console.error('Error getting index stats:', error);
+      // Continue anyway
+    }
     
     console.log('Attempting query with:', {
       vector: queryEmbedding.slice(0, 5), // Log just first 5 dimensions for brevity
@@ -198,13 +155,18 @@ exports.generateMovieScenes = functions.https.onRequest({
 
     // Parse the response into a structured list of scenes
     const scenes = response.text
-      .split('\n')
-      .filter(line => line.trim())
-      .map((line, index) => {
-        const sceneText = line.replace(/^\d+\.\s*/, '').trim();
+      .split(/\d+\.\s+/)  // Split by numbers followed by a period and whitespace
+      .filter(text => text.trim())  // Remove empty entries
+      .map((sceneText, index) => {
+        // Extract scene title and description if present
+        const match = sceneText.match(/^(Scene \w+):\s*(.*)/s);
+        const title = match ? match[1] : `Scene ${index + 1}`;
+        const description = match ? match[2].trim() : sceneText.trim();
+        
         return {
           id: index + 1,
-          text: sceneText,
+          title: title,
+          text: description,
           duration: 15, // Default duration in seconds
           type: 'scene',
           status: 'pending'
@@ -231,46 +193,4 @@ exports.generateMovieScenes = functions.https.onRequest({
       details: error.message
     });
   }
-});
-
-// Export the onUserCreated function with proper configuration
-exports.onUserCreated = functions.firestore.onDocumentCreated({
-  document: 'users/{userId}',
-  memory: '256MiB',
-  cpu: 0.5,
-  maxInstances: 10,
-  timeoutSeconds: 30
-}, async (event) => {
-    const snapshot = event.data;
-    if (!snapshot) {
-        return;
-    }
-
-    const userData = snapshot.data();
-    const userId = event.params.userId;
-    
-    logger.info("Processing new user profile:", userData.email);
-
-    try {
-        // Update the document with additional fields
-        await snapshot.ref.update({
-            createdAt: admin.firestore.FieldValue.serverTimestamp(),
-            lastLogin: admin.firestore.FieldValue.serverTimestamp(),
-            hasCompletedOnboarding: false,
-            profileCompletion: 0,
-            tokens: 0,
-            emailVerified: false,
-            role: 'user'
-        });
-        
-        logger.info("Successfully processed profile for user:", userData.email);
-    } catch (error) {
-        logger.error("Error processing user profile:", error);
-        throw error;
-    }
-});
-
-// Export all functions
-module.exports = {
-  ...require('./functions')
-};
+}); 

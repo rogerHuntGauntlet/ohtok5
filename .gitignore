@@ -44,5 +44,14 @@ app.*.map.json
 /android/app/profile
 /android/app/release
 
+# Firebase configuration files
+**/google-services.json
+**/GoogleService-Info.plist
+
+# Environment files
+.env
+.env.*
+!.env.example
+
 # Temporary directories
 /temp_clipchain/

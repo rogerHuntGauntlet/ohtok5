@@ -1,43 +1,11 @@
-/**
- * Import function triggers from their respective submodules:
- *
- * const {onCall} = require("firebase-functions/v2/https");
- * const {onDocumentWritten} = require("firebase-functions/v2/firestore");
- *
- * See a full list of supported triggers at https://firebase.google.com/docs/functions
- */
-
-const {onRequest} = require("firebase-functions/v2/https");
-const functions = require('firebase-functions/v2');
-const logger = require("firebase-functions/logger");
-const admin = require('firebase-admin');
-const {onDocumentCreated} = require('firebase-functions/v2/firestore');
 const { Pinecone } = require('@pinecone-database/pinecone');
 const { OpenAIEmbeddings } = require('@langchain/openai');
 const { OpenAI } = require('@langchain/openai');
 const { PromptTemplate } = require('@langchain/core/prompts');
 const { LLMChain } = require('langchain/chains');
-admin.initializeApp();
+const functions = require('firebase-functions/v2');
 
-// Import the RAG function
-const ragFunctions = require('./rag_functions');
-
-// Create and deploy your first functions
-// https://firebase.google.com/docs/functions/get-started
-
-// exports.helloWorld = onRequest((request, response) => {
-//   logger.info("Hello logs!", {structuredData: true});
-//   response.send("Hello from Firebase!");
-// });
-
-// Export the generateMovieScenes function as an HTTP function
-exports.generateMovieScenes = functions.https.onRequest({
-  cors: true,
-  maxInstances: 10,
-  memory: '1GiB',
-  cpu: 1,
-  timeoutSeconds: 120
-}, async (req, res) => {
+exports.generateMovieScenes = functions.https.onRequest(async (req, res) => {
   // Enable CORS
   res.set('Access-Control-Allow-Origin', '*');
   
@@ -52,36 +20,13 @@ exports.generateMovieScenes = functions.https.onRequest({
   try {
     console.log('Received movie idea:', req.body.movieIdea);
     
-    // Get API keys from environment or config
-    let PINECONE_API_KEY, OPENAI_API_KEY;
-    
-    if (process.env.NODE_ENV === 'production') {
-      // In production, use Firebase config
-      const config = functions.params;
-      console.log('Available config params:', Object.keys(config));
-      PINECONE_API_KEY = config.pinecone?.apikey;
-      OPENAI_API_KEY = config.openai?.apikey;
-    } else {
-      // In development, use environment variables
-      PINECONE_API_KEY = process.env.PINECONE_API_KEY;
-      OPENAI_API_KEY = process.env.OPENAI_API_KEY;
-    }
-
-    console.log('API Keys loaded:', { 
-      hasPinecone: !!PINECONE_API_KEY, 
-      hasOpenAI: !!OPENAI_API_KEY,
-      pineconeKeyLength: PINECONE_API_KEY ? PINECONE_API_KEY.length : 0,
-      openaiKeyLength: OPENAI_API_KEY ? OPENAI_API_KEY.length : 0,
-      environment: process.env.NODE_ENV || 'development'
-    });
+    // Get secrets from environment
+    const PINECONE_API_KEY = process.env.PINECONE_API_KEY_SECRET;
+    const OPENAI_API_KEY = process.env.OPENAI_API_KEY_SECRET;
 
     if (!PINECONE_API_KEY || !OPENAI_API_KEY) {
-      console.error('Missing required API keys:', {
-        hasPinecone: !!PINECONE_API_KEY,
-        hasOpenAI: !!OPENAI_API_KEY,
-        availableConfig: process.env.NODE_ENV === 'production' ? functions.params : { PINECONE_API_KEY, OPENAI_API_KEY }
-      });
-      return res.status(500).json({ error: 'Server configuration error - Missing API keys' });
+      console.error('Missing required API keys');
+      return res.status(500).json({ error: 'Server configuration error' });
     }
     
     // Initialize Pinecone
@@ -231,46 +176,4 @@ exports.generateMovieScenes = functions.https.onRequest({
       details: error.message
     });
   }
-});
-
-// Export the onUserCreated function with proper configuration
-exports.onUserCreated = functions.firestore.onDocumentCreated({
-  document: 'users/{userId}',
-  memory: '256MiB',
-  cpu: 0.5,
-  maxInstances: 10,
-  timeoutSeconds: 30
-}, async (event) => {
-    const snapshot = event.data;
-    if (!snapshot) {
-        return;
-    }
-
-    const userData = snapshot.data();
-    const userId = event.params.userId;
-    
-    logger.info("Processing new user profile:", userData.email);
-
-    try {
-        // Update the document with additional fields
-        await snapshot.ref.update({
-            createdAt: admin.firestore.FieldValue.serverTimestamp(),
-            lastLogin: admin.firestore.FieldValue.serverTimestamp(),
-            hasCompletedOnboarding: false,
-            profileCompletion: 0,
-            tokens: 0,
-            emailVerified: false,
-            role: 'user'
-        });
-        
-        logger.info("Successfully processed profile for user:", userData.email);
-    } catch (error) {
-        logger.error("Error processing user profile:", error);
-        throw error;
-    }
-});
-
-// Export all functions
-module.exports = {
-  ...require('./functions')
-};
+}); 
