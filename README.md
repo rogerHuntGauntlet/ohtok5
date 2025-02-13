@@ -1,16 +1,88 @@
-# ohftok_app
+# OHFtok
 
-A new Flutter project.
+A Flutter application that generates creative movie scenes using AI.
 
-## Getting Started
+## Features
 
-This project is a starting point for a Flutter application.
+- Speech-to-text movie idea input
+- AI-powered scene generation using GPT-4
+- Scene editing and management
+- Firebase integration for data persistence
+- Real-time updates
 
-A few resources to get you started if this is your first Flutter project:
+## Setup
 
-- [Lab: Write your first Flutter app](https://docs.flutter.dev/get-started/codelab)
-- [Cookbook: Useful Flutter samples](https://docs.flutter.dev/cookbook)
+1. Clone the repository
+```bash
+git clone https://github.com/yourusername/ohftokv5.git
+cd ohftokv5
+```
 
-For help getting started with Flutter development, view the
-[online documentation](https://docs.flutter.dev/), which offers tutorials,
-samples, guidance on mobile development, and a full API reference.
+2. Install dependencies
+```bash
+# Install Flutter dependencies
+flutter pub get
+
+# Install Cloud Functions dependencies
+cd cloud
+npm install
+```
+
+3. Set up environment variables
+```bash
+# Copy the example environment file
+cp cloud/.env.example cloud/.env
+
+# Edit .env with your API keys
+# Required APIs:
+# - OpenAI
+# - Pinecone
+# - Replicate
+```
+
+4. Set up Firebase
+- Create a new Firebase project
+- Enable Firestore
+- Set up Firebase Authentication
+- Deploy Firebase Functions
+
+5. Run the app
+```bash
+flutter run
+```
+
+## Project Structure
+
+- `/lib` - Flutter application code
+- `/cloud` - Firebase Cloud Functions
+  - `functions.js` - Main functions code
+  - `server.js` - Local development server
+
+## Development
+
+To run the local development server:
+```bash
+cd cloud
+npm run serve
+```
+
+To deploy Firebase Functions:
+```bash
+cd cloud
+npm run deploy
+```
+
+## Environment Variables
+
+Required environment variables in `cloud/.env`:
+- `OPENAI_API_KEY` - OpenAI API key for GPT-4
+- `PINECONE_API_KEY` - Pinecone API key for vector database
+- `REPLICATE_API_TOKEN` - Replicate API token for additional AI models
+
+## Contributing
+
+1. Fork the repository
+2. Create your feature branch
+3. Commit your changes
+4. Push to the branch
+5. Create a Pull Request
