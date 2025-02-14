@@ -41,7 +41,7 @@ dependencies:
   media_kit_video: ^1.2.4
   media_kit_libs_video: ^1.0.4
   video_player: ^2.8.2
-  chewie: ^1.7.5
+  chewie: ^1.7.4
 
   # Network monitoring
   connectivity_plus: ^6.1.3
@@ -55,6 +55,9 @@ dependencies:
 
   # Cloud Functions
   cloud_functions: ^4.5.8
+
+  # Image picker
+  image_picker: ^1.0.7
 
 dev_dependencies:
   flutter_test:

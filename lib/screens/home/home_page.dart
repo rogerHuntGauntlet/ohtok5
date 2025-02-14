@@ -8,6 +8,7 @@ import 'package:permission_handler/permission_handler.dart';
 import '../movie/scene_generation_loading_screen.dart';
 import '../movie/movie_scenes_screen.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import '../movie/movie_video_player_screen.dart';
 
 class HomePage extends StatefulWidget {
   const HomePage({super.key});
@@ -195,6 +196,8 @@ class _HomePageState extends State<HomePage> {
             builder: (context) => MovieScenesScreen(
               movieIdea: _movieIdea,
               scenes: scenes,
+              movieId: scenes[0]['movieId'],
+              movieTitle: null,
             ),
           ),
         );
@@ -411,59 +414,107 @@ class _HomePageState extends State<HomePage> {
                     itemCount: movies.length,
                     itemBuilder: (context, index) {
                       final movie = movies[index];
+                      final isComplete = _isMovieComplete(movie);
+                      
                       return Card(
                         margin: const EdgeInsets.only(bottom: 12),
-                        child: ListTile(
-                          leading: const CircleAvatar(
-                            child: Icon(Icons.movie),
-                          ),
-                          title: Text(movie['movieIdea']),
-                          subtitle: Text(
-                            'Created ${_formatTimestamp(movie['createdAt'])}',
-                            style: TextStyle(color: Colors.grey[600]),
-                          ),
-                          trailing: Row(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              if (movie['isPublic'])
-                                Padding(
-                                  padding: const EdgeInsets.only(right: 8),
-                                  child: Row(
-                                    mainAxisSize: MainAxisSize.min,
-                                    children: [
-                                      Icon(
-                                        Icons.visibility,
-                                        size: 16,
-                                        color: Colors.grey[600],
+                        child: InkWell(
+                          onTap: () => _navigateToMovie(movie),
+                          child: Padding(
+                            padding: const EdgeInsets.all(12.0),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Row(
+                                  children: [
+                                    const CircleAvatar(
+                                      child: Icon(Icons.movie),
+                                    ),
+                                    const SizedBox(width: 12),
+                                    Expanded(
+                                      child: Column(
+                                        crossAxisAlignment: CrossAxisAlignment.start,
+                                        children: [
+                                          Text(
+                                            movie['title'] ?? movie['movieIdea'],
+                                            style: const TextStyle(
+                                              fontSize: 16,
+                                              fontWeight: FontWeight.bold,
+                                            ),
+                                          ),
+                                          if (movie['title'] != null)
+                                            Text(
+                                              movie['movieIdea'],
+                                              style: TextStyle(color: Colors.grey[600]),
+                                              maxLines: 2,
+                                              overflow: TextOverflow.ellipsis,
+                                            ),
+                                        ],
                                       ),
-                                      const SizedBox(width: 4),
-                                      Text(
-                                        '${movie['views']}',
-                                        style: TextStyle(
+                                    ),
+                                    const Icon(Icons.chevron_right),
+                                  ],
+                                ),
+                                const SizedBox(height: 8),
+                                Row(
+                                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                  children: [
+                                    Column(
+                                      crossAxisAlignment: CrossAxisAlignment.start,
+                                      children: [
+                                        Text(
+                                          'Created: ${_formatTimestamp(movie['createdAt'])}',
+                                          style: TextStyle(color: Colors.grey[600], fontSize: 12),
+                                        ),
+                                        Text(
+                                          'Last Updated: ${_formatTimestamp(movie['updatedAt'] ?? movie['createdAt'])}',
+                                          style: TextStyle(color: Colors.grey[600], fontSize: 12),
+                                        ),
+                                      ],
+                                    ),
+                                    if (_getIncompleteScenesCount(movie) > 0)
+                                      Chip(
+                                        label: Text('${_getIncompleteScenesCount(movie)} scenes need videos'),
+                                        backgroundColor: Colors.orange[100],
+                                        labelStyle: TextStyle(color: Colors.orange[900]),
+                                      )
+                                    else
+                                      TextButton.icon(
+                                        onPressed: () => _toggleMoviePublicStatus(movie),
+                                        icon: Icon(
+                                          movie['isPublic'] ? Icons.unpublished : Icons.publish,
+                                          size: 18,
+                                        ),
+                                        label: Text(movie['isPublic'] ? 'Unpublish' : 'Publish'),
+                                        style: TextButton.styleFrom(
+                                          foregroundColor: movie['isPublic'] ? Colors.red : Colors.green,
+                                        ),
+                                      ),
+                                  ],
+                                ),
+                                if (movie['isPublic'])
+                                  Padding(
+                                    padding: const EdgeInsets.only(top: 8.0),
+                                    child: Row(
+                                      mainAxisAlignment: MainAxisAlignment.start,
+                                      children: [
+                                        Icon(
+                                          Icons.visibility,
+                                          size: 16,
                                           color: Colors.grey[600],
                                         ),
-                                      ),
-                                    ],
-                                  ),
-                                ),
-                              IconButton(
-                                icon: const Icon(Icons.chevron_right),
-                                onPressed: () async {
-                                  final fullMovie = await Provider.of<MovieService>(context, listen: false)
-                                      .getMovie(movie['documentId']);
-                                  if (mounted) {
-                                    Navigator.of(context).push(
-                                      MaterialPageRoute(
-                                        builder: (context) => MovieScenesScreen(
-                                          movieIdea: fullMovie['movieIdea'],
-                                          scenes: fullMovie['scenes'],
+                                        const SizedBox(width: 4),
+                                        Text(
+                                          '${movie['views'] ?? 0} views',
+                                          style: TextStyle(
+                                            color: Colors.grey[600],
+                                          ),
                                         ),
-                                      ),
-                                    );
-                                  }
-                                },
-                              ),
-                            ],
+                                      ],
+                                    ),
+                                  ),
+                              ],
+                            ),
                           ),
                         ),
                       );
@@ -528,25 +579,168 @@ class _HomePageState extends State<HomePage> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              const Padding(
-                padding: EdgeInsets.symmetric(vertical: 8.0),
-                child: TextField(
-                  decoration: InputDecoration(
-                    hintText: 'Search movies...',
-                    prefixIcon: Icon(Icons.search),
-                    border: OutlineInputBorder(),
-                  ),
+              const Text(
+                'Discover Movies',
+                style: TextStyle(
+                  fontSize: 24,
+                  fontWeight: FontWeight.bold,
                 ),
               ),
               const SizedBox(height: 16),
-              // TODO: Add search results here
-              Center(
-                child: Text(
-                  'Search for movies to fork and remix',
-                  style: TextStyle(
-                    color: Colors.grey[600],
-                  ),
-                ),
+              StreamBuilder<List<Map<String, dynamic>>>(
+                stream: Provider.of<MovieService>(context).getPublicMovies(),
+                builder: (context, snapshot) {
+                  if (snapshot.hasError) {
+                    return Center(
+                      child: Text(
+                        'Error loading movies: ${snapshot.error}',
+                        style: TextStyle(color: Colors.red[400]),
+                      ),
+                    );
+                  }
+
+                  if (!snapshot.hasData) {
+                    return const Center(
+                      child: CircularProgressIndicator(),
+                    );
+                  }
+
+                  final movies = snapshot.data!;
+                  if (movies.isEmpty) {
+                    return Center(
+                      child: Text(
+                        'No public movies available yet',
+                        style: TextStyle(
+                          color: Colors.grey[600],
+                        ),
+                      ),
+                    );
+                  }
+
+                  return ListView.builder(
+                    shrinkWrap: true,
+                    physics: const NeverScrollableScrollPhysics(),
+                    itemCount: movies.length,
+                    itemBuilder: (context, index) {
+                      final movie = movies[index];
+                      final scenes = List<Map<String, dynamic>>.from(movie['scenes'] ?? [])
+                          .where((scene) => 
+                            scene['videoUrl'] != null && 
+                            scene['videoUrl'].toString().isNotEmpty
+                          )
+                          .toList();
+                      
+                      return Card(
+                        margin: const EdgeInsets.only(bottom: 12),
+                        child: InkWell(
+                          onTap: () async {
+                            try {
+                              // Get full movie data with all scenes
+                              final fullMovie = await Provider.of<MovieService>(context, listen: false)
+                                  .getMovie(movie['documentId']);
+                              
+                              if (mounted) {
+                                Navigator.of(context).push(
+                                  MaterialPageRoute(
+                                    builder: (context) => MovieScenesScreen(
+                                      movieIdea: fullMovie['movieIdea'],
+                                      scenes: fullMovie['scenes'],
+                                      movieId: fullMovie['documentId'],
+                                      movieTitle: fullMovie['title'],
+                                      isReadOnly: true,  // Set to read-only mode
+                                    ),
+                                  ),
+                                );
+                              }
+                            } catch (e) {
+                              if (mounted) {
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  SnackBar(
+                                    content: Text('Error loading movie: $e'),
+                                    backgroundColor: Colors.red,
+                                  ),
+                                );
+                              }
+                            }
+                          },
+                          child: Padding(
+                            padding: const EdgeInsets.all(12.0),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Row(
+                                  children: [
+                                    const CircleAvatar(
+                                      child: Icon(Icons.movie),
+                                    ),
+                                    const SizedBox(width: 12),
+                                    Expanded(
+                                      child: Column(
+                                        crossAxisAlignment: CrossAxisAlignment.start,
+                                        children: [
+                                          Text(
+                                            movie['title'] ?? movie['movieIdea'],
+                                            style: const TextStyle(
+                                              fontSize: 16,
+                                              fontWeight: FontWeight.bold,
+                                            ),
+                                          ),
+                                          if (movie['title'] != null)
+                                            Text(
+                                              movie['movieIdea'],
+                                              style: TextStyle(color: Colors.grey[600]),
+                                              maxLines: 2,
+                                              overflow: TextOverflow.ellipsis,
+                                            ),
+                                        ],
+                                      ),
+                                    ),
+                                    const Icon(Icons.play_circle_outline),
+                                  ],
+                                ),
+                                const SizedBox(height: 8),
+                                Row(
+                                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                  children: [
+                                    Text(
+                                      'Created: ${_formatTimestamp(movie['createdAt'])}',
+                                      style: TextStyle(color: Colors.grey[600], fontSize: 12),
+                                    ),
+                                    Row(
+                                      children: [
+                                        Icon(
+                                          Icons.visibility,
+                                          size: 16,
+                                          color: Colors.grey[600],
+                                        ),
+                                        const SizedBox(width: 4),
+                                        Text(
+                                          '${movie['views'] ?? 0}',
+                                          style: TextStyle(
+                                            color: Colors.grey[600],
+                                            fontSize: 12,
+                                          ),
+                                        ),
+                                        const SizedBox(width: 16),
+                                        Text(
+                                          '${scenes.length} scenes',
+                                          style: TextStyle(
+                                            color: Colors.grey[600],
+                                            fontSize: 12,
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  ],
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                      );
+                    },
+                  );
+                },
               ),
             ],
           ),
@@ -593,5 +787,83 @@ class _HomePageState extends State<HomePage> {
     final RenderBox? renderBox = _createVideoButtonKey.currentContext?.findRenderObject() as RenderBox?;
     if (renderBox == null) return Offset.zero;
     return renderBox.localToGlobal(Offset.zero);
+  }
+
+  /// Navigate to movie details screen
+  Future<void> _navigateToMovie(Map<String, dynamic> movie) async {
+    try {
+      final fullMovie = await Provider.of<MovieService>(context, listen: false)
+          .getMovie(movie['documentId']);
+      if (mounted) {
+        Navigator.of(context).push(
+          MaterialPageRoute(
+            builder: (context) => MovieScenesScreen(
+              movieIdea: fullMovie['movieIdea'],
+              scenes: fullMovie['scenes'],
+              movieId: fullMovie['documentId'],
+              movieTitle: fullMovie['title'],
+            ),
+          ),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error loading movie: $e')),
+        );
+      }
+    }
+  }
+
+  bool _isMovieComplete(Map<String, dynamic> movie) {
+    final scenes = movie['scenes'] as List<dynamic>?;
+    if (scenes == null || scenes.isEmpty) return false;
+    return scenes.every((scene) => 
+      scene['status'] == 'completed' && 
+      scene['videoUrl'] != null && 
+      scene['videoUrl'].toString().isNotEmpty
+    );
+  }
+
+  int _getIncompleteScenesCount(Map<String, dynamic> movie) {
+    final scenes = movie['scenes'] as List<dynamic>?;
+    if (scenes == null) return 0;
+    
+    return scenes.where((scene) => 
+      scene['videoUrl'] == null || 
+      scene['videoUrl'].toString().isEmpty
+    ).length;
+  }
+
+  Future<void> _toggleMoviePublicStatus(Map<String, dynamic> movie) async {
+    try {
+      final movieService = Provider.of<MovieService>(context, listen: false);
+      await movieService.updateMoviePublicStatus(
+        movie['documentId'],
+        !movie['isPublic'],
+      );
+      
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              movie['isPublic'] 
+                ? 'Movie unpublished successfully' 
+                : 'Movie published successfully'
+            ),
+            backgroundColor: Colors.green,
+          ),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Error updating movie status: $e'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    }
   }
 } 

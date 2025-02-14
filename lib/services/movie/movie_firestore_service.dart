@@ -106,17 +106,106 @@ class MovieFirestoreService {
   }
 
   Stream<List<Map<String, dynamic>>> getUserMovies() {
-    final user = _auth.currentUser;
-    if (user == null) throw 'User not authenticated';
+    final userId = _auth.currentUser?.uid;
+    if (userId == null) throw 'User not authenticated';
 
     return _firestore
         .collection('movies')
-        .where('userId', isEqualTo: user.uid)
+        .where('userId', isEqualTo: userId)
+        .snapshots()
+        .asyncMap((snapshot) async {
+          final movies = <Map<String, dynamic>>[];
+          
+          for (final doc in snapshot.docs) {
+            final movieData = doc.data();
+            final scenesSnapshot = await doc.reference
+                .collection('scenes')
+                .orderBy('id')
+                .get();
+            
+            final scenes = scenesSnapshot.docs
+                .map((sceneDoc) => {
+                      ...sceneDoc.data(),
+                      'documentId': sceneDoc.id,
+                    })
+                .toList();
+
+            movies.add({
+              ...movieData,
+              'documentId': doc.id,
+              'scenes': scenes,
+            });
+          }
+          
+          return movies;
+        });
+  }
+
+  /// Updates a movie's title
+  Future<void> updateMovieTitle(String movieId, String title) async {
+    try {
+      await _firestore.collection('movies').doc(movieId).update({
+        'title': title,
+        'updatedAt': FieldValue.serverTimestamp(),
+      });
+    } catch (e) {
+      print('Error updating movie title: $e');
+      throw 'Failed to update movie title';
+    }
+  }
+
+  /// Updates a movie's public status
+  Future<void> updateMoviePublicStatus(String movieId, bool isPublic) async {
+    try {
+      await _firestore.collection('movies').doc(movieId).update({
+        'isPublic': isPublic,
+        'updatedAt': FieldValue.serverTimestamp(),
+      });
+    } catch (e) {
+      print('Error updating movie public status: $e');
+      throw 'Failed to update movie public status';
+    }
+  }
+
+  /// Gets all public movies with their scenes
+  Stream<List<Map<String, dynamic>>> getPublicMovies() {
+    return _firestore
+        .collection('movies')
+        .where('isPublic', isEqualTo: true)
         .orderBy('createdAt', descending: true)
         .snapshots()
-        .map((snapshot) => snapshot.docs.map((doc) => {
-              ...doc.data(),
-              'documentId': doc.id,
-            }).toList());
+        .asyncMap((snapshot) async {
+          final movies = <Map<String, dynamic>>[];
+          
+          for (final doc in snapshot.docs) {
+            final movieData = doc.data();
+            final scenesSnapshot = await doc.reference
+                .collection('scenes')
+                .orderBy('id')
+                .get();
+            
+            final scenes = scenesSnapshot.docs
+                .map((sceneDoc) => {
+                      ...sceneDoc.data(),
+                      'documentId': sceneDoc.id,
+                    })
+                .where((scene) => 
+                    scene['status'] == 'completed' && 
+                    scene['videoUrl'] != null && 
+                    scene['videoUrl'].toString().isNotEmpty
+                )
+                .toList();
+
+            if (scenes.isNotEmpty) {
+              movies.add({
+                ...movieData,
+                'documentId': doc.id,
+                'scenes': scenes,
+              });
+            }
+          }
+          
+          return movies;
+        });
   }
 } 

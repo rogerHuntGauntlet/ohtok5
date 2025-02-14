@@ -5,7 +5,7 @@ import 'package:media_kit_video/media_kit_video.dart';
 /// Service responsible for video playback functionality
 class VideoService extends ChangeNotifier {
   late final Player _player;
-  late final VideoController _controller;
+  late VideoController _controller;
   bool _isInitialized = false;
   String? _currentUrl;
   bool _isLooping = true;
@@ -17,7 +17,7 @@ class VideoService extends ChangeNotifier {
   }
 
   Future<void> _initializeController() async {
-    _controller = await VideoController.create(_player);
+    _controller = VideoController(_player);
     notifyListeners();
   }
 
@@ -86,7 +86,6 @@ class VideoService extends ChangeNotifier {
 
     return Video(
       controller: _controller,
-      controls: NoVideoControls,
       fit: fit,
     );
   }
