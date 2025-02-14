@@ -1,12 +1,122 @@
 import 'package:flutter/material.dart';
+import 'dart:async';
+import 'package:provider/provider.dart';
+import '../../services/movie/movie_service.dart';
+import 'movie_scenes_screen.dart';
 
-class SceneGenerationLoadingScreen extends StatelessWidget {
+class SceneGenerationLoadingScreen extends StatefulWidget {
   final String movieIdea;
 
   const SceneGenerationLoadingScreen({
     super.key,
     required this.movieIdea,
   });
+
+  @override
+  State<SceneGenerationLoadingScreen> createState() => _SceneGenerationLoadingScreenState();
+}
+
+class _SceneGenerationLoadingScreenState extends State<SceneGenerationLoadingScreen> {
+  String _currentStep = 'Initializing scene generation';
+  final List<String> _completedSteps = [];
+
+  @override
+  void initState() {
+    super.initState();
+    _startGeneration();
+  }
+
+  Future<void> _startGeneration() async {
+    try {
+      final movieService = Provider.of<MovieService>(context, listen: false);
+      
+      // Update progress through the steps
+      setState(() {
+        _currentStep = 'Initializing scene generation';
+      });
+
+      await Future.delayed(const Duration(seconds: 2));
+      setState(() {
+        _completedSteps.add(_currentStep);
+        _currentStep = 'Analyzing your movie idea';
+      });
+
+      await Future.delayed(const Duration(seconds: 4));
+      setState(() {
+        _completedSteps.add(_currentStep);
+        _currentStep = 'Creating scene descriptions';
+      });
+
+      // Generate the scenes
+      final scenes = await movieService.generateMovieScenes(widget.movieIdea);
+
+      if (scenes.isEmpty) {
+        throw 'No scenes were generated. Please try again.';
+      }
+
+      setState(() {
+        _completedSteps.add(_currentStep);
+        _currentStep = 'Finalizing your movie';
+      });
+
+      await Future.delayed(const Duration(seconds: 2));
+      
+      if (!mounted) return;
+
+      // Navigate to the scenes screen
+      Navigator.of(context).pushReplacement(
+        MaterialPageRoute(
+          builder: (context) => MovieScenesScreen(
+            movieIdea: widget.movieIdea,
+            scenes: scenes,
+            movieId: scenes.first['movieId'],
+          ),
+        ),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      
+      // Show error dialog
+      showDialog(
+        context: context,
+        barrierDismissible: false,
+        builder: (context) => AlertDialog(
+          title: const Text('Error'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Icon(
+                Icons.error_outline,
+                color: Colors.red,
+                size: 48,
+              ),
+              const SizedBox(height: 16),
+              Text(
+                e.toString(),
+                textAlign: TextAlign.center,
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () {
+                Navigator.of(context).pop(); // Close dialog
+                Navigator.of(context).pop(); // Go back to previous screen
+              },
+              child: const Text('Go Back'),
+            ),
+            ElevatedButton(
+              onPressed: () {
+                Navigator.of(context).pop(); // Close dialog
+                _startGeneration(); // Retry generation
+              },
+              child: const Text('Try Again'),
+            ),
+          ],
+        ),
+      );
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -42,7 +152,7 @@ class SceneGenerationLoadingScreen extends StatelessWidget {
                       ),
                       const SizedBox(height: 8),
                       Text(
-                        movieIdea,
+                        widget.movieIdea,
                         style: const TextStyle(fontSize: 16),
                       ),
                     ],
@@ -54,41 +164,46 @@ class SceneGenerationLoadingScreen extends StatelessWidget {
                 child: CircularProgressIndicator(),
               ),
               const SizedBox(height: 32),
-              const Card(
+              Card(
                 child: Padding(
-                  padding: EdgeInsets.all(16.0),
+                  padding: const EdgeInsets.all(16.0),
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text(
+                      const Text(
                         'What\'s Happening:',
                         style: TextStyle(
                           fontSize: 18,
                           fontWeight: FontWeight.bold,
                         ),
                       ),
-                      SizedBox(height: 16),
+                      const SizedBox(height: 16),
                       _StepIndicator(
                         icon: Icons.psychology,
                         text: 'Analyzing your idea',
-                        isCompleted: true,
+                        isCompleted: _completedSteps.contains('Analyzing your movie idea'),
+                        isActive: _currentStep == 'Analyzing your movie idea',
                       ),
-                      _StepDivider(),
+                      const _StepDivider(),
                       _StepIndicator(
                         icon: Icons.auto_awesome,
                         text: 'Gathering creative inspiration',
-                        isCompleted: true,
+                        isCompleted: _completedSteps.contains('Creating scene descriptions'),
+                        isActive: _currentStep == 'Creating scene descriptions',
                       ),
-                      _StepDivider(),
+                      const _StepDivider(),
                       _StepIndicator(
                         icon: Icons.movie_creation,
                         text: 'Crafting your scenes',
-                        isActive: true,
+                        isCompleted: _completedSteps.contains('Finalizing your movie'),
+                        isActive: _currentStep == 'Finalizing your movie',
                       ),
-                      _StepDivider(),
+                      const _StepDivider(),
                       _StepIndicator(
                         icon: Icons.check_circle,
                         text: 'Finalizing your movie',
+                        isCompleted: _completedSteps.contains('Finalizing your movie'),
+                        isActive: _currentStep == 'Finalizing your movie',
                       ),
                     ],
                   ),

@@ -1,13 +1,20 @@
 import 'package:flutter/material.dart';
 import '../video/components/video_player.dart';
+import '../../services/fork_services/fork_service.dart';
+import 'package:provider/provider.dart';
+import '../movie/movie_scenes_screen.dart';
 
 class MovieVideoPlayerScreen extends StatefulWidget {
   final List<Map<String, dynamic>> scenes;
   final int initialIndex;
+  final String movieId;
+  final String userId;
 
   const MovieVideoPlayerScreen({
     super.key,
     required this.scenes,
+    required this.movieId,
+    required this.userId,
     this.initialIndex = 0,
   });
 
@@ -18,6 +25,40 @@ class MovieVideoPlayerScreen extends StatefulWidget {
 class _MovieVideoPlayerScreenState extends State<MovieVideoPlayerScreen> {
   late PageController _pageController;
   int _currentIndex = 0;
+
+  // Helper function to navigate to forked movie
+  Future<void> _navigateToForkedMovie(BuildContext context, String newMovieId) async {
+    try {
+      final forkService = ForkService();
+      final movie = await forkService.getMovie(newMovieId);
+      
+      if (context.mounted) {
+        // Pop until we reach the main navigation stack
+        Navigator.of(context).popUntil((route) => route.isFirst);
+        
+        // Navigate to the new movie's scenes screen
+        Navigator.of(context).push(
+          MaterialPageRoute(
+            builder: (context) => MovieScenesScreen(
+              movieIdea: movie['movieIdea'],
+              scenes: List<Map<String, dynamic>>.from(movie['scenes']),
+              movieId: newMovieId,
+              movieTitle: movie['title'],
+            ),
+          ),
+        );
+      }
+    } catch (e) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Error navigating to forked movie: $e'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    }
+  }
 
   @override
   void initState() {
@@ -137,6 +178,249 @@ class _MovieVideoPlayerScreenState extends State<MovieVideoPlayerScreen> {
                                     ),
                                   ),
                                   const SizedBox(height: 40),
+                                  ElevatedButton.icon(
+                                    onPressed: () {
+                                      // Close the current bottom sheet
+                                      Navigator.pop(context);
+                                      // Show fork options dialog
+                                      showDialog(
+                                        context: context,
+                                        builder: (context) => AlertDialog(
+                                          backgroundColor: Colors.grey[900],
+                                          title: const Text(
+                                            'Fork Options',
+                                            style: TextStyle(color: Colors.white),
+                                          ),
+                                          content: const Text(
+                                            'Do you want to fork just this scene, or this scene and all scenes before it?',
+                                            style: TextStyle(color: Colors.white70),
+                                          ),
+                                          actions: [
+                                            TextButton(
+                                              onPressed: () async {
+                                                Navigator.pop(context);
+                                                // Show loading dialog with 4-second timer
+                                                showDialog(
+                                                  context: context,
+                                                  barrierDismissible: false,
+                                                  builder: (context) => FutureBuilder(
+                                                    future: Future.delayed(const Duration(seconds: 4)),
+                                                    builder: (context, snapshot) {
+                                                      if (snapshot.connectionState == ConnectionState.done) {
+                                                        return Center(
+                                                          child: Card(
+                                                            color: Colors.black87,
+                                                            child: Padding(
+                                                              padding: const EdgeInsets.all(32.0),
+                                                              child: Column(
+                                                                mainAxisSize: MainAxisSize.min,
+                                                                children: [
+                                                                  const Icon(
+                                                                    Icons.check_circle,
+                                                                    color: Colors.green,
+                                                                    size: 48,
+                                                                  ),
+                                                                  const SizedBox(height: 16),
+                                                                  const Text(
+                                                                    'Fork created successfully!',
+                                                                    style: TextStyle(color: Colors.white),
+                                                                  ),
+                                                                  const SizedBox(height: 24),
+                                                                  ElevatedButton.icon(
+                                                                    onPressed: () {
+                                                                      Navigator.of(context).popUntil((route) => route.isFirst);
+                                                                      // Wait for next frame to ensure DefaultTabController is ready
+                                                                      Future.microtask(() {
+                                                                        final tabController = DefaultTabController.of(context);
+                                                                        if (tabController != null) {
+                                                                          tabController.animateTo(1);
+                                                                        }
+                                                                      });
+                                                                    },
+                                                                    icon: const Icon(Icons.fork_right),
+                                                                    label: const Text('View in mNp(s)'),
+                                                                    style: ElevatedButton.styleFrom(
+                                                                      backgroundColor: Colors.blue,
+                                                                      foregroundColor: Colors.white,
+                                                                      padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+                                                                    ),
+                                                                  ),
+                                                                ],
+                                                              ),
+                                                            ),
+                                                          ),
+                                                        );
+                                                      }
+                                                      return const Center(
+                                                        child: Card(
+                                                          color: Colors.black87,
+                                                          child: Padding(
+                                                            padding: EdgeInsets.all(32.0),
+                                                            child: Column(
+                                                              mainAxisSize: MainAxisSize.min,
+                                                              children: [
+                                                                CircularProgressIndicator(),
+                                                                SizedBox(height: 16),
+                                                                Text(
+                                                                  'Creating your fork...',
+                                                                  style: TextStyle(color: Colors.white),
+                                                                ),
+                                                              ],
+                                                            ),
+                                                          ),
+                                                        ),
+                                                      );
+                                                    },
+                                                  ),
+                                                );
+
+                                                try {
+                                                  final forkService = ForkService();
+                                                  await forkService.forkSingleScene(
+                                                    originalMovieId: widget.movieId,
+                                                    scene: {
+                                                      ...scene,
+                                                      'movieId': widget.movieId,
+                                                      'userId': widget.userId,
+                                                    },
+                                                    movieIdea: scene['text'] ?? 'Forked Scene',
+                                                    originalCreatorId: widget.userId,
+                                                  );
+                                                } catch (e) {
+                                                  if (context.mounted) {
+                                                    ScaffoldMessenger.of(context).showSnackBar(
+                                                      SnackBar(
+                                                        content: Text('Error: $e'),
+                                                        backgroundColor: Colors.red,
+                                                      ),
+                                                    );
+                                                  }
+                                                }
+                                              },
+                                              child: const Text(
+                                                'Just This Scene',
+                                                style: TextStyle(color: Colors.blue),
+                                              ),
+                                            ),
+                                            ElevatedButton(
+                                              onPressed: () async {
+                                                Navigator.pop(context);
+                                                // Show loading dialog with 4-second timer
+                                                showDialog(
+                                                  context: context,
+                                                  barrierDismissible: false,
+                                                  builder: (context) => FutureBuilder(
+                                                    future: Future.delayed(const Duration(seconds: 4)),
+                                                    builder: (context, snapshot) {
+                                                      if (snapshot.connectionState == ConnectionState.done) {
+                                                        return Center(
+                                                          child: Card(
+                                                            color: Colors.black87,
+                                                            child: Padding(
+                                                              padding: const EdgeInsets.all(32.0),
+                                                              child: Column(
+                                                                mainAxisSize: MainAxisSize.min,
+                                                                children: [
+                                                                  const Icon(
+                                                                    Icons.check_circle,
+                                                                    color: Colors.green,
+                                                                    size: 48,
+                                                                  ),
+                                                                  const SizedBox(height: 16),
+                                                                  const Text(
+                                                                    'Fork created successfully!',
+                                                                    style: TextStyle(color: Colors.white),
+                                                                  ),
+                                                                  const SizedBox(height: 24),
+                                                                  ElevatedButton.icon(
+                                                                    onPressed: () {
+                                                                      Navigator.of(context).popUntil((route) => route.isFirst);
+                                                                      // Wait for next frame to ensure DefaultTabController is ready
+                                                                      Future.microtask(() {
+                                                                        final tabController = DefaultTabController.of(context);
+                                                                        if (tabController != null) {
+                                                                          tabController.animateTo(1);
+                                                                        }
+                                                                      });
+                                                                    },
+                                                                    icon: const Icon(Icons.fork_right),
+                                                                    label: const Text('View in mNp(s)'),
+                                                                    style: ElevatedButton.styleFrom(
+                                                                      backgroundColor: Colors.blue,
+                                                                      foregroundColor: Colors.white,
+                                                                      padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+                                                                    ),
+                                                                  ),
+                                                                ],
+                                                              ),
+                                                            ),
+                                                          ),
+                                                        );
+                                                      }
+                                                      return const Center(
+                                                        child: Card(
+                                                          color: Colors.black87,
+                                                          child: Padding(
+                                                            padding: EdgeInsets.all(32.0),
+                                                            child: Column(
+                                                              mainAxisSize: MainAxisSize.min,
+                                                              children: [
+                                                                CircularProgressIndicator(),
+                                                                SizedBox(height: 16),
+                                                                Text(
+                                                                  'Creating your fork...',
+                                                                  style: TextStyle(color: Colors.white),
+                                                                ),
+                                                              ],
+                                                            ),
+                                                          ),
+                                                        ),
+                                                      );
+                                                    },
+                                                  ),
+                                                );
+
+                                                try {
+                                                  final forkService = ForkService();
+                                                  final scenesWithIds = widget.scenes.map((s) => {
+                                                    ...s,
+                                                    'movieId': widget.movieId,
+                                                    'userId': widget.userId,
+                                                  }).toList();
+                                                  
+                                                  await forkService.forkSceneAndPrevious(
+                                                    originalMovieId: widget.movieId,
+                                                    allScenes: scenesWithIds,
+                                                    currentSceneIndex: _currentIndex,
+                                                    movieIdea: scene['text'] ?? 'Forked Scenes',
+                                                    originalCreatorId: widget.userId,
+                                                  );
+                                                } catch (e) {
+                                                  if (context.mounted) {
+                                                    ScaffoldMessenger.of(context).showSnackBar(
+                                                      SnackBar(
+                                                        content: Text('Error: $e'),
+                                                        backgroundColor: Colors.red,
+                                                      ),
+                                                    );
+                                                  }
+                                                }
+                                              },
+                                              child: const Text('This Scene & Previous'),
+                                            ),
+                                          ],
+                                        ),
+                                      );
+                                    },
+                                    style: ElevatedButton.styleFrom(
+                                      backgroundColor: Colors.blue,
+                                      foregroundColor: Colors.white,
+                                      padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+                                    ),
+                                    icon: const Icon(Icons.fork_right),
+                                    label: const Text('Fork This Scene'),
+                                  ),
+                                  const SizedBox(height: 20),
                                 ],
                               ),
                             ),

@@ -105,6 +105,7 @@ class MovieFirestoreService {
     }
   }
 
+  /// Gets movies for the current user (excluding forks)
   Stream<List<Map<String, dynamic>>> getUserMovies() {
     final userId = _auth.currentUser?.uid;
     if (userId == null) throw 'User not authenticated';
@@ -112,12 +113,57 @@ class MovieFirestoreService {
     return _firestore
         .collection('movies')
         .where('userId', isEqualTo: userId)
+        .orderBy('createdAt', descending: true)
         .snapshots()
         .asyncMap((snapshot) async {
           final movies = <Map<String, dynamic>>[];
           
           for (final doc in snapshot.docs) {
             final movieData = doc.data();
+            // Client-side filter to ensure we only get non-fork movies
+            if (movieData['type'] == 'fork') continue;
+
+            final scenesSnapshot = await doc.reference
+                .collection('scenes')
+                .orderBy('id')
+                .get();
+            
+            final scenes = scenesSnapshot.docs
+                .map((sceneDoc) => {
+                      ...sceneDoc.data(),
+                      'documentId': sceneDoc.id,
+                    })
+                .toList();
+
+            movies.add({
+              ...movieData,
+              'documentId': doc.id,
+              'scenes': scenes,
+            });
+          }
+          
+          return movies;
+        });
+  }
+
+  /// Gets only forked movies for the current user
+  Stream<List<Map<String, dynamic>>> getUserForkedMovies() {
+    final userId = _auth.currentUser?.uid;
+    if (userId == null) throw 'User not authenticated';
+
+    return _firestore
+        .collection('movies')
+        .where('userId', isEqualTo: userId)
+        .orderBy('createdAt', descending: true)
+        .snapshots()
+        .asyncMap((snapshot) async {
+          final movies = <Map<String, dynamic>>[];
+          
+          for (final doc in snapshot.docs) {
+            final movieData = doc.data();
+            // Client-side filter to ensure we only get fork movies
+            if (movieData['type'] != 'fork') continue;
+
             final scenesSnapshot = await doc.reference
                 .collection('scenes')
                 .orderBy('id')
@@ -163,7 +209,41 @@ class MovieFirestoreService {
       });
     } catch (e) {
       print('Error updating movie public status: $e');
-      throw 'Failed to update movie public status';
+      throw 'Failed to update movie status';
+    }
+  }
+
+  /// Deletes a movie and all its associated data
+  Future<void> deleteMovie(String movieId) async {
+    try {
+      final user = _auth.currentUser;
+      if (user == null) throw 'User not authenticated';
+
+      // Get movie reference
+      final movieRef = _firestore.collection('movies').doc(movieId);
+      
+      // Get all scenes to delete their videos later if needed
+      final scenesSnapshot = await movieRef.collection('scenes').get();
+      
+      // Delete all scenes in a batch
+      final batch = _firestore.batch();
+      for (final scene in scenesSnapshot.docs) {
+        batch.delete(scene.reference);
+      }
+      
+      // Delete the movie document
+      batch.delete(movieRef);
+      
+      // Commit the batch
+      await batch.commit();
+
+      // Update user's movies count
+      await _firestore.collection('users').doc(user.uid).update({
+        'moviesCount': FieldValue.increment(-1),
+      });
+    } catch (e) {
+      print('Error deleting movie: $e');
+      throw 'Failed to delete movie';
     }
   }
 

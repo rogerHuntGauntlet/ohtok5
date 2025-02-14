@@ -347,10 +347,6 @@ exports.generateSingleScene = functions.https.onRequest({
 
   try {
     console.log('Received generate request:', JSON.stringify(req.body, null, 2));
-    console.log('Environment variables:', {
-      hasReplicateToken: !!process.env.REPLICATE_API_TOKEN,
-      tokenLength: process.env.REPLICATE_API_TOKEN ? process.env.REPLICATE_API_TOKEN.length : 0
-    });
     
     const { scene, userId } = req.body;
     if (!scene || !scene.text || !userId) {
@@ -361,23 +357,6 @@ exports.generateSingleScene = functions.https.onRequest({
     if (!replicateToken) {
       console.error('Missing Replicate API token');
       return res.status(500).json({ error: 'Server configuration error - Missing Replicate API token' });
-    }
-
-    // Test Replicate API connection
-    try {
-      const testResponse = await axios.get('https://api.replicate.com/v1/models', {
-        headers: {
-          'Authorization': `Bearer ${replicateToken}`,
-          'Content-Type': 'application/json'
-        }
-      });
-      console.log('Replicate API connection test successful');
-    } catch (apiError) {
-      console.error('Replicate API connection test failed:', apiError.response?.data || apiError.message);
-      return res.status(500).json({ 
-        error: 'Failed to connect to Replicate API',
-        details: apiError.response?.data || apiError.message
-      });
     }
 
     // Create prediction using Replicate API
@@ -395,33 +374,45 @@ exports.generateSingleScene = functions.https.onRequest({
     const predictionId = predictionResponse.data.id;
     console.log('Prediction created:', predictionId);
 
-    // Create job document in Firestore
-    const jobRef = admin.firestore().collection('videoJobs').doc(predictionId);
-    await jobRef.set({
-      status: 'analyzing',
-      progress: PROGRESS_STAGES.ANALYZING.progress,
-      message: PROGRESS_STAGES.ANALYZING.message,
-      sceneId: scene.documentId,
-      movieId: scene.movieId,
-      userId,
-      sceneText: scene.text,
-      predictionId,
-      createdAt: getServerTimestamp(),
-      updatedAt: getServerTimestamp()
-    });
+    // Poll for completion
+    let isComplete = false;
+    let videoUrl = '';
+    let attempts = 0;
+    const maxAttempts = 60; // 2 minutes with 2-second intervals
 
-    console.log('Job document created in Firestore');
+    while (!isComplete && attempts < maxAttempts) {
+      await new Promise(resolve => setTimeout(resolve, 2000)); // Wait 2 seconds between checks
+      
+      const statusResponse = await axios.get(`https://api.replicate.com/v1/predictions/${predictionId}`, {
+        headers: { 'Authorization': `Bearer ${replicateToken}` }
+      });
+
+      console.log('Replicate status:', statusResponse.data.status);
+
+      if (statusResponse.data.status === 'succeeded') {
+        isComplete = true;
+        videoUrl = statusResponse.data.output;
+      } else if (statusResponse.data.status === 'failed') {
+        throw new Error(statusResponse.data.error || 'Video generation failed');
+      }
+
+      attempts++;
+    }
+
+    if (!isComplete) {
+      throw new Error('Video generation timed out');
+    }
+
     res.status(200).json({
       success: true,
-      jobId: predictionId,
-      status: 'analyzing',
-      progress: PROGRESS_STAGES.ANALYZING.progress
+      videoUrl: videoUrl,
+      predictionId: predictionId
     });
 
   } catch (error) {
-    console.error('Error initiating video generation:', error.response?.data || error);
+    console.error('Error generating video:', error.response?.data || error);
     res.status(500).json({
-      error: 'Failed to initiate video generation',
+      error: 'Failed to generate video',
       details: error.response?.data || error.message
     });
   }
@@ -478,63 +469,92 @@ exports.getGenerationStatus = functions.https.onRequest({
         break;
 
       case 'processing':
-        await jobRef.update({
-          status: 'generating',
-          progress: PROGRESS_STAGES.GENERATING.progress,
-          message: PROGRESS_STAGES.GENERATING.message,
-          updatedAt: getServerTimestamp()
-        });
+        // Only update if we're not in a later stage
+        if (!['downloading', 'uploading', 'completed'].includes(jobData.status)) {
+          await jobRef.update({
+            status: 'generating',
+            progress: PROGRESS_STAGES.GENERATING.progress,
+            message: PROGRESS_STAGES.GENERATING.message,
+            updatedAt: getServerTimestamp()
+          });
+        }
         break;
 
       case 'succeeded':
         if (!jobData.videoUrl) {
           console.log('Processing completed video...');
           
-          // Download video from Replicate
-          const replicateVideoUrl = prediction.data.output;
-          const videoResponse = await axios.get(replicateVideoUrl, {
-            responseType: 'arraybuffer',
-            headers: { 'Authorization': `Bearer ${replicateToken}` }
-          });
+          try {
+            // Update status to downloading
+            await jobRef.update({
+              status: 'downloading',
+              progress: PROGRESS_STAGES.DOWNLOADING.progress,
+              message: PROGRESS_STAGES.DOWNLOADING.message,
+              updatedAt: getServerTimestamp()
+            });
 
-          // Generate videoId and prepare for storage
-          const videoId = admin.firestore().collection('videos').doc().id;
-          const bucket = getStorage().bucket();
-          const file = bucket.file(`${videoId}.mp4`);
+            // Download video from Replicate
+            const replicateVideoUrl = prediction.data.output;
+            const videoResponse = await axios.get(replicateVideoUrl, {
+              responseType: 'arraybuffer',
+              headers: { 'Authorization': `Bearer ${replicateToken}` }
+            });
 
-          // Upload to Firebase Storage
-          await file.save(videoResponse.data, {
-            metadata: generateVideoMetadata(videoId, jobData)
-          });
+            // Update status to uploading
+            await jobRef.update({
+              status: 'uploading',
+              progress: PROGRESS_STAGES.UPLOADING.progress,
+              message: PROGRESS_STAGES.UPLOADING.message,
+              updatedAt: getServerTimestamp()
+            });
 
-          // Get permanent download URL
-          const videoUrl = await file.getDownloadURL();
+            // Generate videoId and prepare for storage
+            const videoId = admin.firestore().collection('videos').doc().id;
+            const bucket = getStorage().bucket();
+            const file = bucket.file(`${videoId}.mp4`);
 
-          // Update job document
-          await jobRef.update({
-            status: 'completed',
-            progress: PROGRESS_STAGES.COMPLETED.progress,
-            message: PROGRESS_STAGES.COMPLETED.message,
-            videoUrl,
-            videoId,
-            completedAt: getServerTimestamp(),
-            updatedAt: getServerTimestamp()
-          });
+            // Upload to Firebase Storage
+            await file.save(videoResponse.data, {
+              metadata: generateVideoMetadata(videoId, jobData)
+            });
 
-          // Update scene document
-          await updateSceneWithVideo(
-            jobData.movieId,
-            jobData.sceneId,
-            videoUrl,
-            videoId
-          );
+            // Get download URL
+            const [videoUrl] = await file.getDownloadURL();
 
-          return res.status(200).json({
-            status: 'completed',
-            progress: PROGRESS_STAGES.COMPLETED.progress,
-            videoUrl,
-            videoId
-          });
+            // Update job document with completion
+            await jobRef.update({
+              status: 'completed',
+              progress: PROGRESS_STAGES.COMPLETED.progress,
+              message: PROGRESS_STAGES.COMPLETED.message,
+              videoUrl,
+              videoId,
+              completedAt: getServerTimestamp(),
+              updatedAt: getServerTimestamp()
+            });
+
+            // Update scene document
+            await updateSceneWithVideo(
+              jobData.movieId,
+              jobData.sceneId,
+              videoUrl,
+              videoId
+            );
+
+            return res.status(200).json({
+              status: 'completed',
+              progress: PROGRESS_STAGES.COMPLETED.progress,
+              videoUrl,
+              videoId
+            });
+          } catch (error) {
+            console.error('Error processing video:', error);
+            await jobRef.update({
+              status: 'failed',
+              error: error.message || 'Error processing video',
+              updatedAt: getServerTimestamp()
+            });
+            throw error;
+          }
         }
         break;
 
@@ -572,6 +592,209 @@ exports.getGenerationStatus = functions.https.onRequest({
     console.error('Error checking generation status:', error);
     res.status(500).json({
       error: 'Failed to check video generation status',
+      details: error.message
+    });
+  }
+});
+
+// Generate additional scenes for an existing movie
+exports.generateAdditionalScenes = functions.https.onRequest({
+  cors: true,
+  maxInstances: 10,
+  memory: '1GiB',
+  cpu: 1,
+  timeoutSeconds: 120
+}, async (req, res) => {
+  try {
+    console.log('Received request for additional scenes:', req.body);
+    
+    // Get API keys from environment variables
+    const PINECONE_API_KEY = process.env.PINECONE_API_KEY;
+    const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
+
+    if (!PINECONE_API_KEY || !OPENAI_API_KEY) {
+      console.error('Missing required API keys');
+      return res.status(500).json({ error: 'Server configuration error - Missing API keys' });
+    }
+
+    const { movieId, existingScenes, continuationIdea, numNewScenes } = req.body;
+    if (!movieId || !existingScenes || !continuationIdea || !numNewScenes) {
+      return res.status(400).json({ error: 'Missing required parameters' });
+    }
+
+    // Initialize OpenAI
+    const model = new OpenAI({
+      openAIApiKey: OPENAI_API_KEY,
+      temperature: 0.7,
+      modelName: 'gpt-4',
+    });
+
+    // First, analyze the existing scenes and new direction
+    console.log('Analyzing existing scenes and new direction...');
+    const analysisPrompt = PromptTemplate.fromTemplate(`
+      You are a creative movie analyst and scene writer. Analyze the existing scenes and the new direction for this movie.
+      
+      Existing Scenes:
+      {existingScenes}
+      
+      New Direction:
+      {continuationIdea}
+      
+      Provide a comprehensive analysis of:
+      1. The current narrative arc and themes
+      2. The established style and tone
+      3. Key characters and their development
+      4. Visual and cinematic elements
+      5. Genre elements present
+      
+      Format your analysis as a structured summary that will be used to inform the creation of new scenes.
+    `);
+
+    const analysisChain = new LLMChain({
+      prompt: analysisPrompt,
+      llm: model,
+    });
+
+    const analysis = await analysisChain.call({
+      existingScenes: existingScenes.map(scene => `Scene ${scene.id}: ${scene.text}`).join('\n'),
+      continuationIdea: continuationIdea,
+    });
+
+    console.log('Movie analysis complete:', analysis);
+
+    // Now generate the new scenes
+    console.log('Generating new scenes...');
+    const newScenesPrompt = PromptTemplate.fromTemplate(`
+      You are a creative movie scene generator. Using the provided analysis and new direction,
+      generate additional scenes that continue the movie's narrative while maintaining consistency
+      with the established style and themes.
+
+      Movie Analysis:
+      {analysis}
+      
+      New Direction:
+      {continuationIdea}
+      
+      Generate EXACTLY {numNewScenes} new scenes that:
+      1. Continue naturally from the existing scenes
+      2. Maintain consistency with the established style and tone
+      3. Further develop the narrative and themes
+      4. Are visually descriptive and engaging
+      5. Are suitable for short-form video format
+      
+      IMPORTANT: 
+      - You MUST generate exactly {numNewScenes} scenes, no more and no less.
+      - Format each scene exactly as shown in the example below, maintaining the exact format.
+      - Start scene numbers from {startingSceneNum}.
+      
+      Example format:
+      SCENE_START
+      Number: {startingSceneNum}
+      Description: [Your scene description here]
+      SCENE_END
+
+      Repeat this format for each scene, incrementing the Number each time.
+    `);
+
+    const newScenesChain = new LLMChain({
+      prompt: newScenesPrompt,
+      llm: model,
+    });
+
+    const startingSceneNum = existingScenes.length + 1;
+
+    const newScenesResponse = await newScenesChain.call({
+      analysis: analysis.text,
+      continuationIdea: continuationIdea,
+      numNewScenes: numNewScenes,
+      startingSceneNum: startingSceneNum,
+    });
+
+    console.log('Raw new scenes response:', newScenesResponse);
+
+    // Parse the response into a structured list of scenes using a more robust method
+    const scenes = newScenesResponse.text
+      .split('SCENE_START')
+      .filter(text => text.trim())
+      .map(sceneBlock => {
+        const numberMatch = sceneBlock.match(/Number:\s*(\d+)/);
+        const descriptionMatch = sceneBlock.match(/Description:\s*([\s\S]*?)(?:SCENE_END|$)/);
+        
+        if (!numberMatch || !descriptionMatch) {
+          console.error('Failed to parse scene block:', sceneBlock);
+          throw new Error('Scene generation format was incorrect');
+        }
+
+        const sceneNumber = parseInt(numberMatch[1]);
+        const description = descriptionMatch[1].trim();
+
+        return {
+          id: sceneNumber,
+          title: `Scene ${sceneNumber}`,
+          text: description,
+          duration: 15,
+          type: 'scene',
+          status: 'pending',
+          movieId: movieId,
+        };
+      });
+
+    // Verify we got the correct number of scenes
+    if (scenes.length !== numNewScenes) {
+      console.error(`Generated ${scenes.length} scenes but expected ${numNewScenes}`);
+      console.error('Generated scenes:', scenes);
+      console.error('Raw response:', newScenesResponse.text);
+      throw new Error(`Failed to generate the requested number of scenes (got ${scenes.length}, expected ${numNewScenes})`);
+    }
+
+    // Verify scene numbers are sequential
+    const expectedNumbers = Array.from(
+      { length: numNewScenes }, 
+      (_, i) => startingSceneNum + i
+    );
+    
+    const hasCorrectNumbers = scenes.every((scene, index) => 
+      scene.id === expectedNumbers[index]
+    );
+
+    if (!hasCorrectNumbers) {
+      console.error('Scene numbers are not sequential:', scenes.map(s => s.id));
+      throw new Error('Generated scenes have incorrect numbering');
+    }
+
+    // Update the movie document with the new scenes
+    const movieRef = admin.firestore().collection('movies').doc(movieId);
+    const batch = admin.firestore().batch();
+
+    for (const scene of scenes) {
+      const sceneRef = movieRef.collection('scenes').doc();
+      batch.set(sceneRef, {
+        ...scene,
+        createdAt: admin.firestore.FieldValue.serverTimestamp(),
+        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+      });
+    }
+
+    await batch.commit();
+
+    console.log('Final new scenes:', scenes);
+    res.status(200).json({ 
+      scenes: scenes,
+      metadata: {
+        totalNewScenes: scenes.length,
+        continuationIdea: continuationIdea,
+        generatedAt: new Date().toISOString(),
+        movieId: movieId
+      }
+    });
+  } catch (error) {
+    console.error('Error generating additional scenes:', {
+      message: error.message,
+      stack: error.stack,
+      name: error.name
+    });
+    res.status(500).json({ 
+      error: 'Failed to generate additional scenes. Please try again.',
       details: error.message
     });
   }

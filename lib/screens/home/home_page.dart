@@ -3,6 +3,7 @@ import 'package:provider/provider.dart';
 import '../../services/social/auth_service.dart';
 import '../../widgets/tutorial/tutorial_overlay.dart';
 import 'package:speech_to_text/speech_to_text.dart' as stt;
+import 'package:speech_to_text/speech_to_text.dart' show ListenMode;
 import '../../services/movie/movie_service.dart';
 import 'package:permission_handler/permission_handler.dart';
 import '../movie/scene_generation_loading_screen.dart';
@@ -54,11 +55,10 @@ class _HomePageState extends State<HomePage> {
     try {
       bool available = await _speech.initialize(
         onStatus: (status) {
+          print('Speech status: $status');
+          // Only update listening state, don't auto-process
           if (status == 'done') {
             setState(() => _isListening = false);
-            if (_movieIdea.isNotEmpty) {
-              _processMovieIdea();
-            }
           }
         },
         onError: (error) {
@@ -106,37 +106,88 @@ class _HomePageState extends State<HomePage> {
         builder: (context, setDialogState) {
           dialogSetState = setDialogState;
           return AlertDialog(
-            title: const Text('Recording Movie Idea'),
-            content: Column(
-              mainAxisSize: MainAxisSize.min,
+            title: Row(
               children: [
-                Text(_movieIdea),
-                const SizedBox(height: 16),
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-                  children: [
-                    TextButton(
-                      onPressed: () {
-                        _speech.stop();
-                        Navigator.pop(context);
-                        setState(() {
-                          _isListening = false;
-                          _movieIdea = '';
-                        });
-                      },
-                      child: const Text('Cancel'),
-                    ),
-                    ElevatedButton(
-                      onPressed: () {
-                        _stopListening();
-                        Navigator.pop(context);
-                      },
-                      child: const Text('Stop Recording'),
-                    ),
-                  ],
+                Icon(
+                  _isListening ? Icons.mic : Icons.mic_off,
+                  color: _isListening ? Colors.red : Colors.grey,
                 ),
+                const SizedBox(width: 8),
+                const Text('Recording Movie Idea'),
               ],
             ),
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text(
+                  'Describe your movie idea:',
+                  style: TextStyle(fontWeight: FontWeight.bold),
+                ),
+                const SizedBox(height: 8),
+                Container(
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: Colors.grey[100],
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(color: Colors.grey[300]!),
+                  ),
+                  child: Text(
+                    _movieIdea == 'Listening...' ? 'Speak now...' : _movieIdea,
+                    style: TextStyle(
+                      color: _movieIdea == 'Listening...' ? Colors.grey : Colors.black,
+                      fontStyle: _movieIdea == 'Listening...' ? FontStyle.italic : FontStyle.normal,
+                    ),
+                  ),
+                ),
+                if (_movieIdea != 'Listening...' && _movieIdea.isNotEmpty)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 16),
+                    child: Text(
+                      'Tap Stop Recording when you\'re done speaking.',
+                      style: TextStyle(
+                        color: Colors.grey[600],
+                        fontSize: 12,
+                      ),
+                    ),
+                  ),
+              ],
+            ),
+            actions: [
+              TextButton(
+                onPressed: () {
+                  _speech.stop();
+                  Navigator.pop(context);
+                  setState(() {
+                    _isListening = false;
+                    _movieIdea = '';
+                  });
+                },
+                child: const Text('Cancel'),
+              ),
+              if (_isListening)
+                ElevatedButton(
+                  onPressed: () {
+                    _stopListening();
+                    dialogSetState(() {});
+                  },
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: Colors.red,
+                  ),
+                  child: const Text('Stop Recording'),
+                ),
+              if (!_isListening && _movieIdea.isNotEmpty)
+                ElevatedButton(
+                  onPressed: () {
+                    Navigator.pop(context);
+                    _processMovieIdea();
+                  },
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: Colors.blue,
+                  ),
+                  child: const Text('Create Movie'),
+                ),
+            ],
           );
         },
       ),
@@ -145,11 +196,15 @@ class _HomePageState extends State<HomePage> {
     try {
       await _speech.listen(
         onResult: (result) {
+          final text = result.recognizedWords;
           setState(() {
-            _movieIdea = result.recognizedWords.isEmpty ? 'Listening...' : result.recognizedWords;
+            _movieIdea = text.isEmpty ? 'Listening...' : text;
           });
           dialogSetState(() {}); // Update the dialog with new text
         },
+        listenMode: ListenMode.dictation,
+        cancelOnError: true,
+        partialResults: true,
       );
     } catch (e) {
       print('Listen error: $e');
@@ -166,54 +221,37 @@ class _HomePageState extends State<HomePage> {
   Future<void> _stopListening() async {
     await _speech.stop();
     setState(() => _isListening = false);
-    if (_movieIdea.isNotEmpty && _movieIdea != 'Listening...') {
-      _processMovieIdea();
-    }
   }
 
   Future<void> _processMovieIdea() async {
     if (_movieIdea.isEmpty) return;
 
-    // Show loading screen
+    final movieIdeaCopy = _movieIdea;  // Create a copy before resetting
+
+    // Stop listening if still active
+    if (_isListening) {
+      await _stopListening();
+    }
+
+    // Reset the state first
+    setState(() {
+      _movieIdea = '';
+      _isListening = false;
+      _isProcessing = false;
+    });
+
+    // Use a slight delay to ensure the dialog is closed properly
+    await Future.delayed(const Duration(milliseconds: 100));
+
+    // Navigate to loading screen if still mounted
     if (mounted) {
-      Navigator.of(context).push(
+      Navigator.of(context).pushReplacement(
         MaterialPageRoute(
           builder: (context) => SceneGenerationLoadingScreen(
-            movieIdea: _movieIdea,
+            movieIdea: movieIdeaCopy,
           ),
         ),
       );
-    }
-
-    try {
-      final movieService = Provider.of<MovieService>(context, listen: false);
-      final scenes = await movieService.generateMovieScenes(_movieIdea);
-      
-      if (mounted) {
-        // Replace loading screen with scenes screen
-        Navigator.of(context).pushReplacement(
-          MaterialPageRoute(
-            builder: (context) => MovieScenesScreen(
-              movieIdea: _movieIdea,
-              scenes: scenes,
-              movieId: scenes[0]['movieId'],
-              movieTitle: null,
-            ),
-          ),
-        );
-      }
-    } catch (e) {
-      if (mounted) {
-        // Pop loading screen on error
-        Navigator.of(context).pop();
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error processing movie idea: $e')),
-        );
-      }
-    } finally {
-      if (mounted) {
-        setState(() => _isProcessing = false);
-      }
     }
   }
 
@@ -436,19 +474,18 @@ class _HomePageState extends State<HomePage> {
                                         crossAxisAlignment: CrossAxisAlignment.start,
                                         children: [
                                           Text(
-                                            movie['title'] ?? movie['movieIdea'],
+                                            movie['title'] ?? 'Untitled',
                                             style: const TextStyle(
                                               fontSize: 16,
                                               fontWeight: FontWeight.bold,
                                             ),
                                           ),
-                                          if (movie['title'] != null)
-                                            Text(
-                                              movie['movieIdea'],
-                                              style: TextStyle(color: Colors.grey[600]),
-                                              maxLines: 2,
-                                              overflow: TextOverflow.ellipsis,
-                                            ),
+                                          Text(
+                                            movie['movieIdea'],
+                                            style: TextStyle(color: Colors.grey[600]),
+                                            maxLines: 2,
+                                            overflow: TextOverflow.ellipsis,
+                                          ),
                                         ],
                                       ),
                                     ),
@@ -555,14 +592,235 @@ class _HomePageState extends State<HomePage> {
                 ),
               ),
               const SizedBox(height: 16),
-              // TODO: Add forked movies list here
-              Center(
-                child: Text(
-                  'Movies you\'ve forked will appear here',
-                  style: TextStyle(
-                    color: Colors.grey[600],
-                  ),
-                ),
+              StreamBuilder<List<Map<String, dynamic>>>(
+                stream: Provider.of<MovieService>(context).getUserForkedMovies(),
+                builder: (context, snapshot) {
+                  if (snapshot.hasError) {
+                    return Center(
+                      child: Text(
+                        'Error loading movies: ${snapshot.error}',
+                        style: TextStyle(color: Colors.red[400]),
+                      ),
+                    );
+                  }
+
+                  if (!snapshot.hasData) {
+                    return const Center(
+                      child: CircularProgressIndicator(),
+                    );
+                  }
+
+                  final movies = snapshot.data!;
+                  if (movies.isEmpty) {
+                    return Center(
+                      child: Text(
+                        'Movies you\'ve forked will appear here',
+                        style: TextStyle(
+                          color: Colors.grey[600],
+                        ),
+                      ),
+                    );
+                  }
+
+                  return ListView.builder(
+                    shrinkWrap: true,
+                    physics: const NeverScrollableScrollPhysics(),
+                    itemCount: movies.length,
+                    itemBuilder: (context, index) {
+                      final movie = movies[index];
+                      
+                      return Dismissible(
+                        key: Key(movie['documentId']),
+                        direction: DismissDirection.endToStart,
+                        background: Container(
+                          color: Colors.red,
+                          alignment: Alignment.centerRight,
+                          padding: const EdgeInsets.only(right: 24.0),
+                          child: Row(
+                            mainAxisAlignment: MainAxisAlignment.end,
+                            children: [
+                              Column(
+                                mainAxisAlignment: MainAxisAlignment.center,
+                                children: [
+                                  const Icon(
+                                    Icons.delete,
+                                    color: Colors.white,
+                                    size: 32,
+                                  ),
+                                  const SizedBox(height: 4),
+                                  Text(
+                                    'Delete',
+                                    style: TextStyle(
+                                      color: Colors.white,
+                                      fontWeight: FontWeight.bold,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                              const SizedBox(width: 16),
+                            ],
+                          ),
+                        ),
+                        confirmDismiss: (direction) async {
+                          return await showDialog(
+                            context: context,
+                            builder: (BuildContext context) {
+                              return AlertDialog(
+                                title: Row(
+                                  children: [
+                                    const Icon(Icons.warning, color: Colors.red),
+                                    const SizedBox(width: 8),
+                                    const Text('Delete Forked Movie'),
+                                  ],
+                                ),
+                                content: Column(
+                                  mainAxisSize: MainAxisSize.min,
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    const Text(
+                                      'Are you sure you want to delete this forked movie?',
+                                      style: TextStyle(fontWeight: FontWeight.bold),
+                                    ),
+                                    const SizedBox(height: 8),
+                                    Text(
+                                      movie['title'] ?? 'Untitled Movie',
+                                      style: TextStyle(
+                                        color: Colors.grey[600],
+                                        fontStyle: FontStyle.italic,
+                                      ),
+                                    ),
+                                    const SizedBox(height: 16),
+                                    const Text(
+                                      'This action cannot be undone.',
+                                      style: TextStyle(color: Colors.red),
+                                    ),
+                                  ],
+                                ),
+                                actions: [
+                                  TextButton(
+                                    onPressed: () => Navigator.of(context).pop(false),
+                                    child: const Text('Cancel'),
+                                  ),
+                                  ElevatedButton.icon(
+                                    onPressed: () => Navigator.of(context).pop(true),
+                                    style: ElevatedButton.styleFrom(
+                                      backgroundColor: Colors.red,
+                                      foregroundColor: Colors.white,
+                                    ),
+                                    icon: const Icon(Icons.delete),
+                                    label: const Text('Delete'),
+                                  ),
+                                ],
+                              );
+                            },
+                          );
+                        },
+                        onDismissed: (direction) async {
+                          try {
+                            final movieService = Provider.of<MovieService>(context, listen: false);
+                            await movieService.deleteMovie(movie['documentId']);
+
+                            if (!mounted) return;
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              const SnackBar(
+                                content: Text('Forked movie deleted successfully'),
+                                backgroundColor: Colors.green,
+                              ),
+                            );
+                          } catch (e) {
+                            if (!mounted) return;
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              SnackBar(
+                                content: Text('Error deleting forked movie: $e'),
+                                backgroundColor: Colors.red,
+                              ),
+                            );
+                          }
+                        },
+                        child: Card(
+                          margin: const EdgeInsets.only(bottom: 12),
+                          child: InkWell(
+                            onTap: () => _navigateToMovie(movie),
+                            child: Padding(
+                              padding: const EdgeInsets.all(12.0),
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Row(
+                                    children: [
+                                      const CircleAvatar(
+                                        child: Icon(Icons.fork_right),
+                                      ),
+                                      const SizedBox(width: 12),
+                                      Expanded(
+                                        child: Column(
+                                          crossAxisAlignment: CrossAxisAlignment.start,
+                                          children: [
+                                            Text(
+                                              movie['title'] ?? 'Untitled',
+                                              style: const TextStyle(
+                                                fontSize: 16,
+                                                fontWeight: FontWeight.bold,
+                                              ),
+                                            ),
+                                            Text(
+                                              movie['movieIdea'],
+                                              style: TextStyle(color: Colors.grey[600]),
+                                              maxLines: 2,
+                                              overflow: TextOverflow.ellipsis,
+                                            ),
+                                          ],
+                                        ),
+                                      ),
+                                      const Icon(Icons.chevron_right),
+                                    ],
+                                  ),
+                                  const SizedBox(height: 8),
+                                  Row(
+                                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                    children: [
+                                      Column(
+                                        crossAxisAlignment: CrossAxisAlignment.start,
+                                        children: [
+                                          Text(
+                                            'Created: ${_formatTimestamp(movie['createdAt'])}',
+                                            style: TextStyle(color: Colors.grey[600], fontSize: 12),
+                                          ),
+                                          Text(
+                                            'Last Updated: ${_formatTimestamp(movie['updatedAt'] ?? movie['createdAt'])}',
+                                            style: TextStyle(color: Colors.grey[600], fontSize: 12),
+                                          ),
+                                        ],
+                                      ),
+                                      if (_getIncompleteScenesCount(movie) > 0)
+                                        Chip(
+                                          label: Text('${_getIncompleteScenesCount(movie)} scenes need videos'),
+                                          backgroundColor: Colors.orange[100],
+                                          labelStyle: TextStyle(color: Colors.orange[900]),
+                                        )
+                                      else
+                                        TextButton.icon(
+                                          onPressed: () => _toggleMoviePublicStatus(movie),
+                                          icon: Icon(
+                                            movie['isPublic'] ? Icons.unpublished : Icons.publish,
+                                            size: 18,
+                                          ),
+                                          label: Text(movie['isPublic'] ? 'Unpublish' : 'Publish'),
+                                          style: TextButton.styleFrom(
+                                            foregroundColor: movie['isPublic'] ? Colors.red : Colors.green,
+                                          ),
+                                        ),
+                                    ],
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ),
+                        ),
+                      );
+                    },
+                  );
+                },
               ),
             ],
           ),
@@ -670,8 +928,10 @@ class _HomePageState extends State<HomePage> {
                               children: [
                                 Row(
                                   children: [
-                                    const CircleAvatar(
-                                      child: Icon(Icons.movie),
+                                    CircleAvatar(
+                                      child: Icon(
+                                        movie['forkedFrom'] != null ? Icons.fork_right : Icons.movie,
+                                      ),
                                     ),
                                     const SizedBox(width: 12),
                                     Expanded(
@@ -679,19 +939,37 @@ class _HomePageState extends State<HomePage> {
                                         crossAxisAlignment: CrossAxisAlignment.start,
                                         children: [
                                           Text(
-                                            movie['title'] ?? movie['movieIdea'],
+                                            movie['title'] ?? 'Untitled',
                                             style: const TextStyle(
                                               fontSize: 16,
                                               fontWeight: FontWeight.bold,
                                             ),
                                           ),
-                                          if (movie['title'] != null)
-                                            Text(
-                                              movie['movieIdea'],
-                                              style: TextStyle(color: Colors.grey[600]),
-                                              maxLines: 2,
-                                              overflow: TextOverflow.ellipsis,
-                                            ),
+                                          Text(
+                                            movie['movieIdea'],
+                                            style: TextStyle(color: Colors.grey[600]),
+                                            maxLines: 2,
+                                            overflow: TextOverflow.ellipsis,
+                                          ),
+                                          const SizedBox(height: 4),
+                                          Row(
+                                            children: [
+                                              Icon(
+                                                movie['forkedFrom'] != null ? Icons.fork_right : Icons.movie_creation,
+                                                size: 14,
+                                                color: Colors.grey[600],
+                                              ),
+                                              const SizedBox(width: 4),
+                                              Text(
+                                                movie['forkedFrom'] != null ? 'Forked Movie' : 'Original Movie',
+                                                style: TextStyle(
+                                                  color: Colors.grey[600],
+                                                  fontSize: 12,
+                                                  fontStyle: FontStyle.italic,
+                                                ),
+                                              ),
+                                            ],
+                                          ),
                                         ],
                                       ),
                                     ),
